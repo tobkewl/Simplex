@@ -27,9 +27,16 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
+          node -v
+          npm -v
           npm config set fund false
           npm config set audit false
           npm ci --verbose
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "npm ci failed. Retrying with npm install."
+            npm install --verbose
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Upload npm logs on failure
         if: failure()
