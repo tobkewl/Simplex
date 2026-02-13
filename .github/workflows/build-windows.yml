@@ -1,0 +1,54 @@
+name: Build Windows Client
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows artifacts
+        run: npm run build -- --win --publish never
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path dist -File -Include *.exe,*.yml,*.blockmap
+          if (-not $files) { throw "No build artifacts found in dist/" }
+          $lines = @()
+          foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $file.FullName).Hash.ToLower()
+            $lines += "$hash  $($file.Name)"
+          }
+          Set-Content -Path dist\SHA256SUMS.txt -Value $lines
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: simplex-windows-build
+          path: |
+            dist/*.exe
+            dist/*.yml
+            dist/*.blockmap
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
