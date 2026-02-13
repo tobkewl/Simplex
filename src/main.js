@@ -810,6 +810,90 @@ function getLiveTrackingDefaultVisibility() {
   return settings?.liveTrackingDefaultVisibility === 'public' ? 'public' : 'private';
 }
 
+function getEnabledLiveTrackingEntries() {
+  if (!settings?.liveTrackingByCharacter || typeof settings.liveTrackingByCharacter !== 'object') {
+    return [];
+  }
+  return Object.values(settings.liveTrackingByCharacter).filter((entry) => entry && entry.enabled === true);
+}
+
+function getPreferredLiveTrackingVisibility() {
+  const enabledEntries = getEnabledLiveTrackingEntries();
+  const enabledPublic = enabledEntries.find((entry) => entry?.visibility === 'public');
+  if (enabledPublic) return 'public';
+  const firstEnabled = enabledEntries.find((entry) => entry?.visibility === 'public' || entry?.visibility === 'private');
+  if (firstEnabled?.visibility === 'public') return 'public';
+  if (firstEnabled?.visibility === 'private') return 'private';
+  return getLiveTrackingDefaultVisibility();
+}
+
+function isLiveTrackingCharacterNotReadyError(err) {
+  const message = String(err || '').toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes('character') &&
+    (
+      message.includes('not found') ||
+      message.includes('unknown') ||
+      message.includes('not available') ||
+      message.includes('missing')
+    )
+  );
+}
+
+function armLiveTrackingPending(visibility = null) {
+  if (!settings || typeof settings !== 'object') return;
+  const nextVisibility = visibility === 'public' ? 'public' : 'private';
+  settings.liveTrackingPending = { visibility: nextVisibility };
+  refreshCurrentCharacterLiveTrackingState();
+  saveSettings(settings);
+  broadcastSettingsUpdate({
+    liveTrackingPending: settings.liveTrackingPending,
+    currentCharacterLiveTracking: settings.currentCharacterLiveTracking,
+  });
+}
+
+async function restoreLiveTrackingOnStartup() {
+  if (!settings || typeof settings !== 'object') return;
+  if (!apiClient || typeof apiClient.setLiveBuildTracking !== 'function') return;
+
+  const map = settings.liveTrackingByCharacter && typeof settings.liveTrackingByCharacter === 'object'
+    ? settings.liveTrackingByCharacter
+    : {};
+
+  const enabledEntries = Object.values(map)
+    .filter((entry) => entry && entry.enabled === true && typeof entry.buildId === 'string')
+    .map((entry) => entry.buildId.trim())
+    .filter(Boolean);
+
+  const uniqueBuildIds = Array.from(new Set(enabledEntries));
+  if (uniqueBuildIds.length === 0) {
+    logger.info('live-tracking:startup:restore-skip', { reason: 'no-enabled-builds' });
+    return;
+  }
+
+  let restored = 0;
+  let failed = 0;
+  for (const buildId of uniqueBuildIds) {
+    try {
+      await apiClient.setLiveBuildTracking(buildId, true);
+      restored += 1;
+    } catch (err) {
+      failed += 1;
+      logger.warn('live-tracking:startup:restore-failed', {
+        buildId,
+        error: String(err),
+      });
+    }
+  }
+
+  logger.info('live-tracking:startup:restore-done', {
+    enabledBuilds: uniqueBuildIds.length,
+    restored,
+    failed,
+  });
+}
+
 function isUnknownLiveTrackingLeague(league) {
   return normalizeLiveTrackingLeague(league).toLowerCase() === 'unknown';
 }
@@ -1686,6 +1770,19 @@ async function handleLiveTrackingLevelUp(payload) {
         resolved = null;
       }
     }
+    if (!settings?.liveTrackingPending && (!resolved || !resolved.entry)) {
+      const enabledElsewhere = getEnabledLiveTrackingEntries().length > 0;
+      if (enabledElsewhere) {
+        const fallbackVisibility = getPreferredLiveTrackingVisibility();
+        armLiveTrackingPending(fallbackVisibility);
+        logger.info('live-tracking:auto-arm', {
+          characterName,
+          league,
+          visibility: fallbackVisibility,
+          reason: 'enabled-on-different-character',
+        });
+      }
+    }
     logger.info('live-tracking:resolve-entry', {
       characterName,
       league,
@@ -1888,11 +1985,33 @@ async function toggleLiveTrackingForActiveCharacter(options = {}) {
     );
 
   if (!resolved || !resolved.entry) {
-    const startResult = await apiClient.startLiveBuild({
-      characterName: activeName,
-      league,
-      visibility: desiredVisibility,
-    });
+    let startResult = null;
+    try {
+      startResult = await apiClient.startLiveBuild({
+        characterName: activeName,
+        league,
+        visibility: desiredVisibility,
+      });
+    } catch (err) {
+      if (isLiveTrackingCharacterNotReadyError(err)) {
+        armLiveTrackingPending(desiredVisibility);
+        logger.info('live-tracking:armed', {
+          characterName: activeName,
+          league,
+          visibility: desiredVisibility,
+          reason: 'character-not-ready',
+          error: String(err),
+        });
+        return {
+          ok: true,
+          enabled: true,
+          armed: true,
+          characterName: activeName,
+          league,
+        };
+      }
+      throw err;
+    }
     const key = buildLiveTrackingKey(league, activeName);
     if (!startResult?.id || !key) {
       return { ok: false, error: 'Unable to create live build for active character' };
@@ -4868,6 +4987,7 @@ app.whenReady().then(async () => {
   const isFirstRun = isNewInstallation();
   activeGuideState = settings.activeGuideState || null;
 
+  void restoreLiveTrackingOnStartup();
   void refreshCharacterInfoCache();
 
   // Keep live-follow refresh logic active even when the build window is not visible.

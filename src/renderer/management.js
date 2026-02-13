@@ -825,20 +825,24 @@ function updateBuildLiveTrackingIndicator(settings) {
   const pending = settings?.liveTrackingPending && typeof settings.liveTrackingPending === 'object'
     ? settings.liveTrackingPending
     : null;
+  const hasEnabledEntries = Boolean(
+    settings?.liveTrackingByCharacter &&
+    typeof settings.liveTrackingByCharacter === 'object' &&
+    Object.values(settings.liveTrackingByCharacter).some((entry) => entry && entry.enabled === true)
+  );
 
   buildLiveBadge.classList.remove('on', 'off', 'armed');
   let mode = 'off';
-  if (current?.enabled === true) {
+  const isArmed = Boolean(pending && current?.enabled !== true);
+  if (current?.enabled === true || hasEnabledEntries || isArmed) {
     mode = 'on';
-  } else if (pending) {
-    mode = 'armed';
   }
   buildLiveBadge.classList.add(mode);
 
   const activeLabel = activeCharacterName
     ? `${activeCharacterName}${activeCharacterLeague ? ` (${activeCharacterLeague})` : ''}`
     : 'none';
-  const trackingLabel = mode === 'on' ? 'ON' : mode === 'armed' ? 'ARMED' : 'OFF';
+  const trackingLabel = current?.enabled === true || hasEnabledEntries ? 'ON' : isArmed ? 'ARMED' : 'OFF';
   buildLiveBadge.title = `Live tracking ${trackingLabel}`;
   buildIndicator.title =
     `Left-click: open/close build guide overlay. Right-click: toggle quick preview. ` +
