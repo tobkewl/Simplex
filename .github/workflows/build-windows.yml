@@ -25,7 +25,22 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        shell: pwsh
+        run: |
+          npm config set fund false
+          npm config set audit false
+          npm ci --verbose
+
+      - name: Upload npm logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-debug-logs
+          path: |
+            C:\npm\cache\_logs\*.log
+            C:\Users\runneradmin\AppData\Local\npm-cache\_logs\*.log
+            C:\Users\runneradmin\AppData\Roaming\npm-cache\_logs\*.log
+          if-no-files-found: ignore
 
       - name: Build Windows artifacts
         run: npm run build -- --win --publish never
