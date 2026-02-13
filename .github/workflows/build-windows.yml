@@ -55,7 +55,7 @@ jobs:
       - name: Generate SHA256 checksums
         shell: pwsh
         run: |
-          $files = Get-ChildItem -Path dist -File -Include *.exe,*.yml,*.blockmap
+          $files = Get-ChildItem -Path dist -File | Where-Object { @('.exe', '.yml', '.blockmap') -contains $_.Extension.ToLowerInvariant() }
           if (-not $files) { throw "No build artifacts found in dist/" }
           $lines = @()
           foreach ($file in $files) {
