@@ -1,0 +1,83 @@
+<!doctype html>
+<html class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://simplex.gg https://web.poecdn.com http://localhost:* http://127.0.0.1:* data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self';" />
+  <title>Build Guide - Simplex</title>
+  <link rel="stylesheet" href="website.css" />
+  <link rel="stylesheet" href="build-overlay.css" />
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <div class="window">
+    <div class="content">
+      <div class="build-header">
+        <div class="build-header-title">Build Guides</div>
+      </div>
+      <div id="buildSelector">
+        <div class="build-tabs">
+          <button id="buildTabDiscover" class="build-tab" type="button">Discover</button>
+          <button id="buildTabMine" class="build-tab active" type="button">My Builds</button>
+          <button id="buildTabFollowing" class="build-tab" type="button">Following</button>
+        </div>
+        <div id="discoverFilters" class="discover-filters hidden">
+          <input id="discoverSearchInput" class="discover-filter-input" type="text" placeholder="Search by name, creator, class or skill..." />
+          <select id="discoverTypeFilter" class="discover-filter-select">
+            <option value="all">All types</option>
+            <option value="guide">Guides</option>
+            <option value="live">Live builds</option>
+          </select>
+          <select id="discoverClassFilter" class="discover-filter-select">
+            <option value="all">All classes</option>
+          </select>
+          <select id="discoverSkillFilter" class="discover-filter-select">
+            <option value="all">All skills</option>
+          </select>
+        </div>
+        <div id="buildsList" class="grid gap-3">
+          <div class="text-sm text-muted-foreground">Loading your builds...</div>
+        </div>
+      </div>
+
+      <div id="buildDetails" class="hidden">
+        <div class="space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 id="buildName" class="text-3xl font-bold">Build Name</h1>
+              <div class="mt-2 flex items-center gap-3 text-sm text-muted-foreground">
+                <span id="buildStatus" class="build-status-pill">Draft</span>
+                <span id="buildDate">Created: -</span>
+              </div>
+            </div>
+            <button id="backBtn" class="btn-header" type="button">Back to list</button>
+          </div>
+
+          <div class="guide-preview">
+            <div class="guide-sidebar">
+              <div class="guide-sidebar-header">
+                <div class="guide-sidebar-image">
+                  <img id="guideSidebarImage" alt="Guide art" />
+                </div>
+                <div class="guide-sidebar-text">
+                  <div id="guideSidebarTitle" class="guide-sidebar-title">Untitled build</div>
+                  <div id="guideSidebarCreator" class="guide-sidebar-creator">by unknown creator</div>
+                </div>
+              </div>
+              <div id="guideTopTabs" class="guide-top-tabs"></div>
+              <div id="guideTopHint" class="guide-top-hint hidden"></div>
+            </div>
+            <div class="guide-main">
+              <div id="guideOverview" class="guide-panel space-y-4"></div>
+              <div id="guideSections" class="guide-panel space-y-4 hidden"></div>
+              <div id="guideLiveView" class="guide-panel space-y-4 hidden"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="tree-viewer.js"></script>
+  <script src="build-manager.js"></script>
+</body>
+</html>

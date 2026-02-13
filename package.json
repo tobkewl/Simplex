@@ -1,0 +1,66 @@
+{
+  "name": "simplex",
+  "version": "1.0.0",
+  "description": "Simplex - Live Trade Feed Overlay",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "convex": "^1.31.4",
+    "dotenv": "^17.2.3",
+    "electron-updater": "^6.7.3",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.simplex.poe",
+    "productName": "Simplex",
+    "compression": "maximum",
+    "files": [
+      "src/**",
+      "package.json",
+      "node_modules/**",
+      "scripts/out/**",
+      "!**/*.map",
+      "!**/*.ts",
+      "!**/*.md",
+      "!**/docs/**",
+      "!scripts/out_spread/**",
+      "!scripts/*.js",
+      "!scripts/*.txt",
+      "!scripts/*.md",
+      "!**/analysis output/**",
+      "!**/test/**",
+      "!**/tests/**",
+      "!**/*.log"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "tobkewl",
+        "repo": "simplex"
+      }
+    ],
+    "win": {
+      "icon": "src/assets/app-icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

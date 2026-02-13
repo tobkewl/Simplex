@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self';">
+  <title>Simplex - Connect</title>
+  <link rel="stylesheet" href="auth.css">
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <div class="window">
+    <div class="header">
+      <div class="header-title">
+        <img src="../assets/app-icon-256.png" alt="Simplex" class="app-icon" />
+        <div>
+          <h1>Simplex</h1>
+          <p>Your Path of Exile companion</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="auth-intro">
+        <h2>Connect Account</h2>
+        <p>Link your Path of Exile account to the Simplex client.</p>
+      </div>
+
+      <div id="error" class="error"></div>
+      <div id="success" class="success"></div>
+
+      <div class="card">
+        <div id="status" class="status">
+          Ready to connect your account.
+        </div>
+
+        <label class="checkbox-label">
+          <input type="checkbox" id="remember-me" checked>
+          Remember me on this device
+        </label>
+
+        <button id="connect-btn" class="primary-btn">Login with PoE</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+</body>
+</html>

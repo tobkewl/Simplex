@@ -1,0 +1,1124 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://web.poecdn.com data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self';">
+    <title>Simplex - Settings</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background: #1a1a1a;
+        color: #e8e8e8;
+        padding: 0;
+        overflow: hidden;
+        border: 1px solid #333;
+        border-radius: 8px;
+      }
+
+      .window {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+
+      /* Header - draggable */
+      .header {
+        -webkit-app-region: drag;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 16px;
+        background: #242424;
+        border-bottom: 1px solid #333;
+        border-radius: 8px 8px 0 0;
+      }
+
+      .header-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .app-icon {
+        width: 32px;
+        height: 32px;
+        animation: blinkGold 1.5s ease-in-out infinite;
+      }
+
+      @keyframes blinkGold {
+        0%, 100% {
+          opacity: 1;
+          filter: brightness(1) drop-shadow(0 0 2px rgba(var(--accent-yellow-rgb), 0.5));
+        }
+        50% {
+          opacity: 0.6;
+          filter: brightness(1.5) drop-shadow(0 0 8px rgba(var(--accent-yellow-rgb), 0.9));
+        }
+      }
+
+      .header h1 {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--accent-yellow);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        letter-spacing: 0.3px;
+      }
+
+      .header p {
+        font-size: 11px;
+        color: #999;
+      }
+
+
+
+
+      
+
+
+      .tab {
+        padding: 10px 20px;
+        background: transparent;
+        border: none;
+        color: #999;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: all 0.2s;
+        border-bottom: 2px solid transparent;
+      }
+
+      .tab:hover {
+        color: #e8e8e8;
+        background: #2a2a2a;
+      }
+
+      .tab.active {
+        color: var(--accent-yellow);
+        background: #2a2a2a;
+        border-bottom-color: var(--accent-yellow);
+      }
+
+      /* Content */
+      .content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+      }
+
+      .tab-content {
+        display: none;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .section {
+        background: #242424;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+
+      .section-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--accent-yellow);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+
+      /* Feed list */
+      .feed-list {
+        list-style: none;
+        margin-bottom: 12px;
+      }
+
+      .feed-item {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .feed-item-name {
+        font-weight: 600;
+        color: var(--accent-yellow);
+        min-width: 110px;
+        font-size: 13px;
+      }
+
+      .feed-item-url {
+        flex: 1;
+        color: #999;
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .feed-row {
+        display: grid;
+        grid-template-columns: 180px 1fr auto;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .feed-row input[type="text"] {
+        margin: 0;
+      }
+
+      /* Form inputs */
+      .feed-input-group {
+        display: grid;
+        grid-template-columns: 180px 1fr auto;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+
+      input[type="text"],
+      input[type="number"] {
+        background: #2a2a2a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 8px 10px;
+        color: var(--accent-yellow);
+        font-size: 12px;
+        width: 100%;
+        transition: all 0.2s;
+      }
+
+      input[type="text"]:focus,
+      input[type="number"]:focus {
+        outline: none;
+        border-color: var(--accent-yellow);
+        background: #1a1a1a;
+      }
+
+      input[type="text"]::placeholder {
+        color: #999;
+      }
+
+      label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        cursor: pointer;
+        font-size: 13px;
+        color: #e8e8e8;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        accent-color: var(--accent-yellow);
+      }
+
+      /* Buttons */
+      button {
+        background: #2a2a2a;
+        border: 1px solid #333;
+        color: var(--accent-yellow);
+        border-radius: 4px;
+        padding: 8px 16px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      button:hover {
+        background: var(--accent-yellow);
+        border-color: var(--accent-yellow);
+        color: #1a1a1a;
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      button.btn-secondary {
+        background: #2a2a2a;
+        border-color: #333;
+        color: #e8e8e8;
+      }
+
+      button.btn-secondary:hover {
+        background: #666;
+        border-color: #666;
+        color: #e8e8e8;
+      }
+
+      button.btn-danger {
+        background: #2a2a2a;
+        border-color: #e57373;
+        color: #ef9a9a;
+      }
+
+      button.btn-danger:hover {
+        background: #e57373;
+        border-color: #e57373;
+        color: #fafafa;
+      }
+
+      button.btn-small {
+        padding: 5px 10px;
+        font-size: 11px;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 6px;
+        margin-top: 12px;
+      }
+
+      /* Form groups */
+      .form-group {
+        margin-bottom: 12px;
+      }
+
+      .form-label {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        color: #e8e8e8;
+        margin-bottom: 5px;
+      }
+
+      /* Status bar */
+      .status-bar {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 10px;
+        font-size: 12px;
+        color: #e8e8e8;
+        margin-top: 12px;
+      }
+
+      .status-bar strong {
+        color: var(--accent-yellow);
+      }
+
+      /* Hints */
+      .hint {
+        font-size: 11px;
+        color: #999;
+        margin-top: 4px;
+        font-style: italic;
+      }
+
+      /* Toggle Switch */
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 24px;
+        cursor: pointer;
+      }
+
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #666;
+        transition: 0.3s;
+        border-radius: 24px;
+        border: 1px solid #333;
+      }
+
+      .toggle-slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 2px;
+        bottom: 2px;
+        background-color: #e8e8e8;
+        transition: 0.3s;
+        border-radius: 50%;
+        border: 1px solid #333;
+      }
+
+      .toggle-switch input:checked + .toggle-slider {
+        background-color: var(--accent-yellow);
+        border-color: var(--accent-yellow);
+      }
+
+      .toggle-switch input:checked + .toggle-slider:before {
+        transform: translateX(26px);
+        background-color: #1a1a1a;
+        border-color: var(--accent-yellow);
+        box-shadow: 0 0 4px rgba(0, 0, 0, 0.45);
+      }
+
+      .controller-focus {
+        outline: 2px solid rgba(242, 201, 76, 0.9);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 2px rgba(242, 201, 76, 0.25), 0 0 10px rgba(242, 201, 76, 0.35);
+      }
+      .controller-focus-toggle .toggle-slider {
+        box-shadow: 0 0 0 2px rgba(242, 201, 76, 0.55), 0 0 12px rgba(242, 201, 76, 0.5);
+        border-color: var(--accent-yellow);
+      }
+
+      /* Disabled state */
+      .disabled-content {
+        opacity: 0.4;
+        pointer-events: none;
+      }
+
+      .disabled-content input,
+      .disabled-content button,
+      .disabled-content select {
+        cursor: not-allowed;
+      }
+
+      .live-tracking-card {
+        background: #2a2a2a;
+        border: 1px solid var(--accent-yellow);
+        border-radius: 6px;
+        padding: 12px;
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+
+      .live-tracking-card.live-tracking-card-inactive {
+        background: #242424;
+        border-color: #3a3a3a;
+      }
+
+      .live-tracking-state {
+        font-size: 12px;
+        font-weight: 600;
+        min-width: 62px;
+        text-align: right;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #1a1a1a;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #666;
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--accent-yellow);
+      }
+
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        opacity: 1;
+        transition: opacity 0.2s ease;
+      }
+
+      .modal-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .modal-card {
+        width: 360px;
+        background: #242424;
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+      }
+
+      .feedback-card {
+        width: 560px;
+        max-width: 90vw;
+      }
+
+      .feedback-tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .feedback-tab {
+        flex: 1;
+        padding: 8px 10px;
+        border: 1px solid #333;
+        border-radius: 6px;
+        background: #1a1a1a;
+        color: #c9c9c9;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .feedback-tab.active {
+        background: var(--accent-yellow);
+        color: #1a1a1a;
+        border-color: var(--accent-yellow);
+      }
+
+      .feedback-field {
+        margin-bottom: 12px;
+      }
+
+      .feedback-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      textarea {
+        background: #2a2a2a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 8px 10px;
+        color: var(--accent-yellow);
+        font-size: 12px;
+        width: 100%;
+        resize: vertical;
+      }
+
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent-yellow);
+        background: #1a1a1a;
+      }
+
+      .feedback-status {
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+        color: #e8e8e8;
+        margin-bottom: 12px;
+        background: #1a1a1a;
+      }
+
+      .modal-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--accent-yellow);
+        margin-bottom: 8px;
+      }
+
+      .modal-text {
+        font-size: 12px;
+        color: #c9c9c9;
+        line-height: 1.4;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+    </style>
+    <link rel="stylesheet" href="theme.css" />
+</head>
+  <body>
+    <div class="window">
+      <!-- Header -->
+      <div class="header">
+        <div class="header-title" style="display: flex; align-items: center; gap: 10px;">
+          <img src="../assets/app-icon-256.png" alt="Simplex" class="app-icon">
+          <div style="display: flex; flex-direction: column;">
+            <div style="font-size: 14px; font-weight: 600; color: var(--accent-yellow);">Simplex</div>
+            <div style="font-size: 11px; color: #999;">Settings</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab active" data-tab="general">General</button>
+        <button class="tab" data-tab="trade">Trade</button>
+        <button class="tab" data-tab="stash">Stash</button>
+        <button class="tab" data-tab="build">Build</button>
+        <button class="tab" data-tab="about">About</button>
+      </div>
+
+      <!-- Content -->
+      <div class="content">
+        <!-- Trade Tab -->
+        <div class="tab-content" id="tab-trade">
+          <div class="section">
+            <div class="section-title">Live Search Feeds</div>
+            <div id="liveSearchesContent">
+              <!-- Login Section - Prerequisite -->
+              <div class="form-group" style="background: #2a2a2a; border: 1px solid var(--accent-yellow); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+                  <div style="flex: 1;">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--accent-yellow); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                      Login Required
+                      <span id="liveSearchesLoginStatus" style="font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 10px; background: #1a1a1a;">
+                        Checking...
+                      </span>
+                    </div>
+                    <div style="font-size: 11px; color: #999; line-height: 1.4;">
+                      Login is required because Simplex opens background Chromium feed windows to keep your live searches tracked in real time.
+                      We never store your credentials.
+                      For best stability, avoid opening the same live-search tabs in your regular browser at the same time, or you may hit Path of Exile rate limits.
+                    </div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <button id="btnLogin" class="btn-secondary" style="white-space: nowrap;">Login to pathofexile.com</button>
+                    <button id="btnCheckLoginStatus" class="btn-secondary" style="white-space: nowrap; font-size: 11px; padding: 6px 12px;">Check Status</button>
+                  </div>
+                </div>
+              </div>
+
+              <ul class="feed-list" id="feedsList"></ul>
+              <div class="hint" style="margin-top: 6px;">Paste the live search URL. Name is optional.</div>
+
+              <div class="button-row">
+                <button id="btnConnect">Activate All Feeds</button>
+              </div>
+
+              <div class="status-bar" id="statusLine">
+                <strong>Active feeds:</strong> 0 | <strong>Last event:</strong> -
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">Live Preview</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Test the overlay with example items. Changes to settings below are applied instantly to the test overlay.
+              <strong style="color: var(--accent-yellow); display: block; margin-top: 8px;">
+                Tip: While this tab is open, you can drag the overlay to reposition it. It will lock again when you close settings.
+              </strong>
+            </div>
+            <div class="button-row">
+              <button id="btnTest" class="btn-secondary">Show Test Overlay</button>
+              <button id="btnAddTestItem" class="btn-secondary">+ Add Test Trade</button>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Display Settings</div>
+            <div class="hint" style="margin-bottom: 12px; font-weight: 500; color: var(--accent-yellow);">
+              Changes are applied instantly - no save needed
+            </div>
+
+            <label>
+              <input id="displayFeedName" type="checkbox" />
+              <span>Display feed name instead of item name</span>
+            </label>
+            <div class="hint" style="margin-left: 24px;">Useful when you have multiple feeds for the same item type</div>
+
+            <label>
+              <input id="showModRanges" type="checkbox" checked />
+              <span>Show modifier ranges (e.g., [24-28])</span>
+            </label>
+            <div class="hint" style="margin-left: 24px;">Display possible value ranges for item modifiers</div>
+
+          </div>
+
+          <div class="section">
+            <div class="section-title">Live Search Dock</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Left-click opens the feed bar. Right-click mutes/unmutes all feeds.
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <div class="form-label">Docking Handle Visibility</div>
+              <select id="dockingHandleVisibility" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                <option value="always">Always Visible</option>
+                <option value="hover">Show on Hover Only</option>
+                <option value="disabled">Disabled (Open via Tray)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- General Tab -->
+        <div class="tab-content active" id="tab-general">
+          <div class="section">
+            <div class="section-title">Modules</div>
+            <div class="hint" style="margin-bottom: 12px;">Enable a module to show its settings tab.</div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div>
+                <div class="form-label">Live Searches</div>
+                <div class="hint">Monitor live trade feeds and manage searches.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="liveSearchesEnabled" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div>
+                <div class="form-label">Whispers</div>
+                <div class="hint">Track incoming and outgoing whispers.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="whispersEnabled" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group disabled-content" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div>
+                <div class="form-label">Stash</div>
+                <div class="hint">Show stash value and OAuth status.</div>
+                <div class="hint" style="margin-top: 4px;">Under construction.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="stashEnabled" disabled />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div>
+                <div class="form-label">Build Guide</div>
+                <div class="hint">Enable the build guide dock and overlays.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="buildGuideEnabled" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Open Settings Shortcuts</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Configure global shortcuts to open the settings window.
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Open Settings (Keyboard)</div>
+              <div class="feed-input-group" style="grid-template-columns: 1fr auto;">
+                <input id="openSettingsShortcut" type="text" placeholder="Press keys (e.g. Ctrl+Shift+S)" />
+                <button id="openSettingsShortcutClear" class="btn-secondary">Clear</button>
+              </div>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div>
+                <div class="form-label">Enable controller shortcut</div>
+                <div class="hint">Turn this on if you want to open settings with a controller combo.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="openSettingsControllerEnabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group" id="openSettingsControllerConfig" style="margin-top: 10px;">
+              <div class="form-label">Controller Type</div>
+              <select id="controllerType" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                <option value="auto">Auto Detect</option>
+                <option value="xbox">Xbox (A/B/X/Y)</option>
+                <option value="playstation">PlayStation (Cross/Circle)</option>
+                <option value="nintendo">Nintendo (B/A/Y/X)</option>
+                <option value="generic">Generic (BTN0/BTN1)</option>
+              </select>
+              <div class="hint" style="margin-top: 4px;">Choose a layout if your controller maps buttons differently.</div>
+
+              <div class="form-label" style="margin-top: 10px;">Open Settings (Controller)</div>
+              <div class="feed-input-group" style="grid-template-columns: 1fr auto;">
+                <input id="openSettingsControllerCombo" type="text" placeholder="Press controller combo" />
+                <button id="openSettingsControllerComboClear" class="btn-secondary">Clear</button>
+              </div>
+              <div class="hint" style="margin-top: 4px;">Focus the field and press a combo on your controller.</div>
+            </div>
+          </div>
+
+          <div class="section" id="linkedAccountSection">
+            <div class="section-title">Account</div>
+            <div class="form-group">
+              <div class="form-label">Linked account</div>
+              <div id="linkedAccountStatus" class="status-bar" style="margin-top: 6px;">Checking...</div>
+            </div>
+            <div class="button-row">
+              <button id="btnUnlinkAccount" class="btn-danger btn-small" disabled>Unlink device</button>
+            </div>
+            <div class="hint">Unlinking will log you out and restart the app to sign in again.</div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Client.txt</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Configure the Path of Exile Client.txt path used for whispers and build guide features.
+            </div>
+            <div class="form-group">
+              <div class="form-label">Client.txt Path</div>
+              <div class="feed-input-group" style="grid-template-columns: 1fr auto auto auto;">
+                <input id="clientLogPathInput" type="text" placeholder="C:\Path of Exile\logs\Client.txt" />
+                <span id="clientLogStatusIcon" style="font-size: 16px; display: flex; align-items: center; padding: 0 8px;"></span>
+                <button id="btnAutoDetectClientLog" class="btn-secondary">Auto Detect</button>
+                <button id="btnBrowseClientLog" class="btn-secondary">Browse</button>
+              </div>
+              <div id="clientLogStatus" style="display: none;"></div>
+              <div class="hint" style="margin-top: 4px;">
+                Usually located at: <code style="color: #999;">&lt;PoE Install Folder&gt;\logs\Client.txt</code><br>
+                Common locations: Steam (<code>Steam\steamapps\common\Path of Exile\logs\Client.txt</code>) or Direct Install (<code>Grinding Gear Games\Path of Exile\logs\Client.txt</code>)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stash Tab -->
+        <div class="tab-content" id="tab-stash">
+            <div class="section">
+            <div class="section-title">Stash Display</div>
+            
+            <!-- Warning: Currently not working -->
+            <div class="form-group" style="background: #2a2a2a; border: 1px solid #e57373; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: flex-start; gap: 8px;">
+                <span style="font-size: 18px;">!</span>
+                <div style="flex: 1;">
+                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-yellow); margin-bottom: 4px;">
+                    Currently Not Working
+                  </div>
+                  <div style="font-size: 11px; color: #999; line-height: 1.4;">
+                    The Stash feature is currently not functional and displays spoofed data. We are working on implementing this feature.
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- OAuth Section - Prerequisite -->
+            <div class="form-group" style="background: #2a2a2a; border: 1px solid var(--accent-yellow); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+                <div style="flex: 1;">
+                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-yellow); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                    Server OAuth Required
+                    <span id="netWorthOAuthStatus" style="font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 10px; background: #1a1a1a;">
+                      Checking...
+                    </span>
+                  </div>
+                  <div style="font-size: 11px; color: #999; line-height: 1.4; margin-bottom: 8px;">
+                    OAuth is managed on simplex.gg and reused by this desktop client. No local OAuth tokens are stored in the app.
+                  </div>
+                  <div id="netWorthOAuthDetails" style="font-size: 10px; color: #999; font-style: italic; line-height: 1.3;">
+                    <!-- OAuth details will be shown here -->
+                  </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <button id="btnOAuthAuthorize" class="btn-secondary" style="white-space: nowrap;">Open simplex.gg Account</button>
+                  <button id="btnCheckOAuthStatus" class="btn-secondary" style="white-space: nowrap; font-size: 11px; padding: 6px 12px;">Check Status</button>
+                </div>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <div class="form-label">Value Display</div>
+              <select id="netWorthCurrencyDisplay" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                <option value="divines">Divines</option>
+                <option value="chaos">Chaos</option>
+              </select>
+              <div class="hint" style="margin-top: 4px;">Choose how to display your stash value</div>
+            </div>
+
+          </div>
+
+          <div class="section">
+            <div class="section-title">Stash Dock</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Configure the stash indicator docking block. Left-click opens the full stash overlay. Right-click opens settings.
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <div class="form-label">Visibility Mode</div>
+              <select id="netWorthVisibility" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                <option value="always">Always Visible</option>
+                <option value="hover">Show on Hover Only</option>
+                <option value="disabled">Disabled (Open via Tray)</option>
+              </select>
+              <div class="hint" style="margin-top: 4px;">Choose when the stash indicator should be visible. When disabled, it can only be opened via the tray icon. When settings are open, you can drag it to reposition.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Build Guide Tab -->
+        <div class="tab-content" id="tab-build">
+          <div class="section">
+            <div class="section-title">Next Node Popup</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Show a small transparent guide for 10 seconds when you level up.
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Enable Popup</div>
+              <label class="toggle-switch" style="margin-top: 6px;">
+                <input type="checkbox" id="buildLevelPopupEnabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <button id="buildLevelPopupTest" class="btn-secondary">Simulate Level Up</button>
+              <div class="hint" style="margin-top: 6px;">Debug only.</div>
+            </div>
+
+            <div class="form-group">
+              <button id="buildLevelPopupPosition" class="btn-secondary">Position Popup</button>
+              <div class="hint" style="margin-top: 6px;">First click shows the popup for positioning, second click hides it.</div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Quick Preview</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Choose which blocks appear in the build quick preview (right-click the build dock).
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Show Skill Tree</div>
+              <label class="toggle-switch" style="margin-top: 6px;">
+                <input type="checkbox" id="buildQuickPreviewShowTree" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Show Skills</div>
+              <label class="toggle-switch" style="margin-top: 6px;">
+                <input type="checkbox" id="buildQuickPreviewShowSkills" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Show Gear</div>
+              <label class="toggle-switch" style="margin-top: 6px;">
+                <input type="checkbox" id="buildQuickPreviewShowGear" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Live Tracking</div>
+            <div id="liveTrackingCard" class="form-group live-tracking-card" style="margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;">
+                <div style="flex: 1;">
+                  <div class="form-label" style="margin-bottom: 4px;">Active Tracking</div>
+                  <div class="hint" style="margin-top: 0;">
+                    Active: track your detected character and push new level snapshots to the server while logged in.
+                    Inactive: stop tracking and stop sending snapshots.
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span id="liveTrackingStateLabel" class="live-tracking-state">Inactive</span>
+                  <label class="toggle-switch" style="margin: 0;">
+                    <input type="checkbox" id="liveTrackingEnabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div id="liveTrackingControls">
+                <div class="form-group" style="margin-bottom: 10px;">
+                  <div class="form-label">Visibility when active</div>
+                  <select id="liveTrackingVisibility" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                    <option value="private">Private</option>
+                    <option value="public">Public</option>
+                  </select>
+                  <div class="hint" style="margin-top: 6px;">
+                    Public lets others follow your build. Private keeps it visible only on your account.
+                  </div>
+                </div>
+
+                <div id="liveTrackingStatus" class="hint" style="margin-top: 6px;"></div>
+
+                <div class="form-group" style="margin-top: 12px; margin-bottom: 0; padding-top: 12px; border-top: 1px solid #333;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+                    <div style="flex: 1;">
+                      <div style="font-size: 13px; font-weight: 600; color: var(--accent-yellow); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                        Server OAuth
+                        <span id="buildLiveOAuthStatus" style="font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 10px; background: #1a1a1a;">
+                          Unknown
+                        </span>
+                      </div>
+                      <div class="hint" style="margin-top: 0; margin-bottom: 6px;">Needed for active tracking.</div>
+                      <div id="buildLiveOAuthDetails" style="font-size: 10px; color: #999; font-style: italic; line-height: 1.3;">
+                        Use server OAuth from simplex.gg to fetch live character snapshots.
+                      </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <button id="btnBuildOAuthAuthorize" class="btn-secondary" style="white-space: nowrap;">Open simplex.gg Account</button>
+                      <button id="btnBuildCheckOAuthStatus" class="btn-secondary" style="white-space: nowrap; font-size: 11px; padding: 6px 12px;">Check Status</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+            <div class="section">
+              <div class="section-title">Build Guide Dock</div>
+              <div class="hint" style="margin-bottom: 12px;">
+                Quick access to your active build guide. Left-click opens the build overlay. Right-click opens the quick preview. Hold Alt and drag the icon to reposition.
+              </div>
+
+              <div class="form-group" style="margin-top: 16px;">
+                <div class="form-label">Dock Visibility</div>
+                <select id="buildDockVisibility" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                  <option value="always">Always Visible</option>
+                  <option value="hover">Show on Hover Only</option>
+                  <option value="disabled">Disabled (Open via Tray)</option>
+                </select>
+              </div>
+
+              <div class="form-group" style="margin-top: 12px;">
+                <button id="buildDockResetPosition" class="btn-secondary">Reset Dock Position</button>
+                <div class="hint" style="margin-top: 6px;">Resets the build dock back to its default spot.</div>
+              </div>
+
+              <div class="form-group" style="margin-top: 16px;">
+                <div class="form-label">Quick Preview Toggle (Keyboard)</div>
+                <div class="feed-input-group" style="grid-template-columns: 1fr auto;">
+                  <input id="buildQuickPreviewShortcut" type="text" placeholder="Press keys (e.g. Ctrl+Shift+Q)" />
+                  <button id="buildQuickPreviewShortcutClear" class="btn-secondary">Clear</button>
+                </div>
+              </div>
+
+              <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <div>
+                  <div class="form-label">Enable controller quick preview</div>
+                  <div class="hint">Turn this on if you want to toggle quick preview via controller combo.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="buildQuickPreviewControllerEnabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="form-group" id="buildQuickPreviewControllerConfig" style="margin-top: 10px;">
+                <div class="form-label">Quick Preview Toggle (Controller)</div>
+                <div class="feed-input-group" style="grid-template-columns: 1fr auto;">
+                  <input id="buildQuickPreviewControllerCombo" type="text" placeholder="Press controller combo" />
+                  <button id="buildQuickPreviewControllerComboClear" class="btn-secondary">Clear</button>
+                </div>
+                <div class="hint" style="margin-top: 4px;">Focus the field and press a combo on your controller.</div>
+              </div>
+            </div>
+        </div>
+
+        <!-- About Tab -->
+        <div class="tab-content" id="tab-about">
+          <div class="section">
+            <div class="section-title">About Simplex</div>
+            
+            <div style="margin-bottom: 24px;">
+              <div style="font-size: 18px; font-weight: 600; color: var(--accent-yellow); margin-bottom: 8px;">
+                Simplex
+              </div>
+              <div style="font-size: 12px; color: #999; margin-bottom: 6px;">
+                Version <span id="appVersion">0.1</span>
+              </div>
+              <div style="font-size: 11px; color: #999; line-height: 1.6; margin-bottom: 8px;">
+                Tab less, play more! Simplex is your Path of Exile companion with three modules in one tool:
+                build guidance, live trade feeds, and stash tracking.
+              </div>
+              <div style="font-size: 11px; color: #999;">
+                Visit <a href="https://simplex.gg" style="color: var(--accent-yellow); text-decoration: none;">simplex.gg</a> for more info.
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Feedback</div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Share a bug report or feature request without leaving the app.
+            </div>
+            <div class="button-row">
+              <button id="btnFeedbackBug" class="btn-secondary">Report a bug</button>
+              <button id="btnFeedbackFeature" class="btn-secondary">Request a feature</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="unlinkModal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-title">Unlink device?</div>
+        <div class="modal-text">
+          This will log you out and restart the app so you can sign in again.
+        </div>
+        <div class="modal-actions">
+          <button id="unlinkCancel" class="btn-secondary btn-small">Cancel</button>
+          <button id="unlinkConfirm" class="btn-danger btn-small">Unlink</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="feedbackModal" class="modal-overlay hidden">
+      <div class="modal-card feedback-card">
+        <div class="modal-title">Send feedback</div>
+        <div class="modal-text" style="margin-bottom: 12px;">
+          Your report is posted to the Simplex community hub. No GitHub account is required.
+        </div>
+        <div class="feedback-tabs">
+          <button id="feedbackTabBug" class="feedback-tab active" type="button">Report a bug</button>
+          <button id="feedbackTabFeature" class="feedback-tab" type="button">Request a feature</button>
+        </div>
+        <form id="feedbackForm">
+          <div class="feedback-field">
+            <label for="feedbackTitle">Title</label>
+            <input id="feedbackTitle" type="text" placeholder="Short summary" maxlength="120" required />
+          </div>
+          <div class="feedback-field">
+            <label for="feedbackDetails">Details</label>
+            <textarea id="feedbackDetails" rows="5" placeholder="Describe what happened or what you want to see." required></textarea>
+          </div>
+          <div class="feedback-field" id="feedbackStepsGroup">
+            <label for="feedbackSteps">Steps to reproduce (optional)</label>
+            <textarea id="feedbackSteps" rows="4" placeholder="1. Open the build planner..."></textarea>
+          </div>
+          <div id="feedbackStatus" class="feedback-status" style="display: none;"></div>
+          <div class="modal-actions">
+            <button id="feedbackCancel" type="button" class="btn-secondary btn-small">Cancel</button>
+            <button id="feedbackSubmit" type="submit" class="btn-small">Submit feedback</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="settings.js"></script>
+  </body>
+</html>
+
+

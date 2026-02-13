@@ -1,0 +1,51 @@
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background: radial-gradient(circle at top right, #2a3240 0%, #111418 60%);
+  color: #e8edf2;
+  display: grid;
+  place-items: center;
+}
+
+.placeholder-shell {
+  width: min(560px, 92vw);
+  border: 1px solid #2f3a4d;
+  background: rgba(16, 20, 28, 0.92);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  border-radius: 14px;
+  padding: 28px;
+}
+
+h1 {
+  margin: 0 0 14px;
+  font-size: 1.4rem;
+}
+
+p {
+  margin: 0 0 10px;
+  line-height: 1.45;
+  color: #c7d0dc;
+}
+
+.actions {
+  margin-top: 20px;
+}
+
+button {
+  border: 1px solid #3d526f;
+  background: #16253a;
+  color: #dbe7f7;
+  border-radius: 8px;
+  padding: 9px 15px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1c3353;
+}

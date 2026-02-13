@@ -1,0 +1,38 @@
+:root,
+.dark {
+  --accent-yellow: #D4AF37;
+  --accent-yellow-rgb: 212, 175, 55;
+  --primary: var(--accent-yellow);
+  --ring: var(--accent-yellow);
+  --chart-1: var(--accent-yellow);
+  --chart-2: var(--accent-yellow);
+  --sidebar-primary: var(--accent-yellow);
+  --sidebar-ring: var(--accent-yellow);
+  --accent: var(--accent-yellow);
+  --sidebar-accent: var(--accent-yellow);
+}
+
+.accent-text {
+  color: var(--accent-yellow);
+}
+
+.accent-link {
+  color: var(--accent-yellow);
+}
+
+.accent-link:hover {
+  color: rgba(var(--accent-yellow-rgb), 0.85);
+}
+
+.accent-chip {
+  background: rgba(var(--accent-yellow-rgb), 0.2);
+  color: var(--accent-yellow);
+}
+
+.accent-ring {
+  box-shadow: 0 0 0 1px rgba(var(--accent-yellow-rgb), 0.6);
+}
+
+.accent-glow {
+  filter: drop-shadow(0 0 10px rgba(var(--accent-yellow-rgb), 0.6));
+}

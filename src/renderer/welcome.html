@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://web.poecdn.com data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self';">
+    <title>Welcome to Simplex</title>
+    <link rel="stylesheet" href="welcome.css" />
+    <link rel="stylesheet" href="theme.css" />
+</head>
+  <body>
+    <div class="window">
+      <!-- Header -->
+      <div class="header">
+        <div class="header-title">
+          <img src="../assets/app-icon-256.png" alt="Simplex" class="app-icon" />
+          <div>
+            <h1>Welcome to Simplex</h1>
+            <p>Your Path of Exile companion overlay</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="content">
+        <div class="welcome-section">
+          <h2>What is Simplex?</h2>
+          <p>Simplex is a powerful overlay tool for Path of Exile that enhances your trading and gameplay experience. It provides three main modules:</p>
+        </div>
+
+        <div class="modules-section">
+          <!-- Live Searches + Whispers Module -->
+          <div class="module-card">
+            <div class="module-header">
+              <h3>Live Searches + Whispers</h3>
+              <span class="module-badge ready">Ready</span>
+            </div>
+            <p class="module-description">
+              Monitor live trade searches in real-time and manage incoming whispers in one place. Get instant alerts for new matches and keep trade conversations organized without leaving the overlay.
+            </p>
+          </div>
+
+          <!-- Build Guides Module -->
+          <div class="module-card">
+            <div class="module-header">
+              <h3>Build Guides</h3>
+              <span class="module-badge ready">Ready</span>
+            </div>
+            <p class="module-description">
+              Follow curated build guides with level-by-level steps, skill trees, and gear milestones. Quickly preview what to do next and keep your progression on track.
+            </p>
+          </div>
+
+          <!-- Net Worth Module -->
+          <div class="module-card">
+            <div class="module-header">
+              <h3>Net Worth Tracker</h3>
+              <span class="module-badge under-construction">Under Construction</span>
+            </div>
+            <p class="module-description">
+              Track your total net worth across all stash tabs with historical trends and run analysis. This module is being rebuilt and will be available soon.
+            </p>
+          </div>
+        </div>
+
+        <div class="footer-section">
+          <p class="footer-note">
+            <strong>Tip:</strong> You can access all settings and modules from the tray icon or by right-clicking the docking handle on the right side of your screen.
+          </p>
+          <button class="btn-primary" id="btnGetStarted">Get Started</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="welcome.js"></script>
+  </body>
+</html>

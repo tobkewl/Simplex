@@ -1,0 +1,45 @@
+<svg width="160" height="12" viewBox="0 0 160 12" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="6" x2="160" y2="6" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8a6a1f" stop-opacity="0.9" />
+      <stop offset="0.15" stop-color="#d4af37" stop-opacity="0.98" />
+      <stop offset="0.5" stop-color="#f0da85" stop-opacity="1" />
+      <stop offset="0.85" stop-color="#d4af37" stop-opacity="0.98" />
+      <stop offset="1" stop-color="#8a6a1f" stop-opacity="0.9" />
+    </linearGradient>
+    <filter id="glow" x="-15%" y="-150%" width="130%" height="400%">
+      <feGaussianBlur stdDeviation="2" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="2" y="4" width="156" height="4" rx="2" fill="#1b1b1b" />
+  <rect x="0" y="2" width="160" height="8" rx="4" fill="url(#gold)" filter="url(#glow)" />
+  <rect x="0" y="2" width="160" height="8" rx="4" fill="url(#gold)" opacity="0.35" />
+</svg>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

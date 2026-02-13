@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self';">
+    <title>Feed Management</title>
+    <link rel="stylesheet" href="management.css" />
+    <link rel="stylesheet" href="theme.css" />
+</head>
+  <body>
+    <!-- Docking handle - draggable, small square -->
+    <div id="dockingHandle" class="docking-handle" title="Left-click: open feed bar. Right-click: mute/unmute all feeds. Hold Alt to drag and reposition.">
+      <img src="../assets/app-icon-256.png" alt="Simplex" class="handle-icon-img" />
+    </div>
+    
+    <!-- Docking handle hover zone - invisible area for hover detection -->
+    <div id="dockingHandleHoverZone" class="hover-zone"></div>
+
+    <!-- Run timer displayed above the net worth indicator during an active run -->
+    <div id="runTimerIndicator" class="run-timer-indicator hidden" title="Click to pause/resume run">
+      <div class="timer-display">
+        <span class="timer-icon">⏱</span>
+        <span class="timer-text" id="runTimerText">60:00</span>
+      </div>
+      <div class="timer-profit-small" id="runTimerProfit">-</div>
+    </div>
+
+    <!-- Net worth indicator shown above the docking handle -->
+    <div id="networthIndicator" class="networth-indicator hidden" title="Click to open Net Worth Tracker. Hold Alt to drag and reposition.">
+      <img src="../assets/currency/divine.png" class="networth-icon-img" alt="Divine Orb" id="networthIconImg" />
+      <div class="networth-value" id="networthValue">-</div>
+    </div>
+
+    <!-- Net worth hover zone - invisible area for hover detection -->
+    <div id="networthHoverZone" class="hover-zone hidden"></div>
+
+    <!-- Build guide indicator shown above the net worth indicator -->
+    <div id="buildIndicator" class="build-indicator" title="Left-click: open/close build guide overlay. Right-click: toggle quick preview. Hold Alt to drag and reposition.">
+      <div class="build-icon">🗺️</div>
+      <div class="build-level" id="buildLevel">--</div>
+      <div class="build-live-badge off" id="buildLiveBadge" title="Live tracking OFF"></div>
+    </div>
+
+    <!-- Build hover zone - invisible area for hover detection -->
+    <div id="buildHoverZone" class="hover-zone"></div>
+
+    <!-- Build quick preview (right-click on build indicator) -->
+    <div id="buildQuickPreview" class="build-quick-preview hidden">
+      <div class="quick-preview-header">
+        <div class="quick-preview-left">
+          <div class="quick-preview-title">Section Preview</div>
+          <div id="quickPreviewSection" class="quick-preview-section">--</div>
+        </div>
+        <div class="quick-preview-right">
+          <div class="quick-preview-level">
+            <button id="quickPreviewLevelMinus" class="quick-preview-level-btn" type="button" aria-label="Decrease level">-</button>
+            <div id="quickPreviewLevelValue" class="quick-preview-level-value">Lv --</div>
+            <button id="quickPreviewLevelPlus" class="quick-preview-level-btn" type="button" aria-label="Increase level">+</button>
+          </div>
+          <button id="quickPreviewClose" class="quick-preview-close" type="button" aria-label="Close">x</button>
+        </div>
+      </div>
+      <div class="quick-preview-body">
+        <div class="quick-preview-meta">
+          <div class="quick-preview-subtitle">Skill Tree</div>
+          <div id="quickPreviewQuestHint" class="quest-hint hidden"></div>
+          <div id="quickPreviewNodeLabel" class="quick-preview-node">--</div>
+        </div>
+        <div id="quickPreviewTreeWrap" class="quick-preview-block">
+          <div class="quick-preview-tree">
+            <canvas id="quickPreviewTreeCanvas" width="340" height="180"></canvas>
+          </div>
+        </div>
+        <div id="quickPreviewSkillsWrap" class="quick-preview-block">
+          <div class="quick-preview-subtitle">Skills</div>
+          <div id="quickPreviewSkills" class="quick-preview-skills"></div>
+        </div>
+        <div id="quickPreviewGearWrap" class="quick-preview-block">
+          <div class="quick-preview-subtitle">Gear</div>
+          <div id="quickPreviewGear" class="quick-preview-gear"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Level up popup -->
+    <div id="levelUpPopup" class="level-up-popup hidden" title="Hold Alt to drag and reposition.">
+      <div class="level-up-header">
+        <div class="level-up-title">Next Node</div>
+        <div id="levelUpLevel" class="level-up-level">Lv --</div>
+      </div>
+      <div class="level-up-canvas-wrap">
+        <canvas id="levelUpCanvas" width="320" height="200"></canvas>
+      </div>
+      <div id="levelUpNodeLabel" class="level-up-node">--</div>
+      <div id="levelUpQuestHint" class="quest-hint hidden"></div>
+    </div>
+
+    <!-- Drag overlay - shown when settings are open -->
+    <div id="dragOverlay" class="drag-overlay hidden">
+      <div class="drag-overlay-text">Settings open - You can drag the blocks</div>
+    </div>
+
+    <!-- Feed bar - horizontal row of feed icons -->
+    <div id="feedBar" class="feed-bar hidden">
+      <div id="feedIcons" class="feed-icons">
+        <!-- Feed icons will be rendered here -->
+      </div>
+      <div class="add-feed-icon" id="addFeedIcon" title="Add new feed">+</div>
+    </div>
+
+    <!-- Dropdown menu for feed options -->
+    <div id="feedDropdown" class="feed-dropdown hidden">
+      <div class="dropdown-section">
+        <label class="dropdown-label">Name:</label>
+        <input type="text" id="dropdownName" class="dropdown-input" />
+      </div>
+      <div class="dropdown-section">
+        <label class="dropdown-label">URL:</label>
+        <input type="text" id="dropdownUrl" class="dropdown-input" />
+      </div>
+      <div class="dropdown-buttons">
+        <button id="dropdownSave" class="dropdown-btn">Save</button>
+        <button id="dropdownMute" class="dropdown-btn">Mute</button>
+        <button id="dropdownDelete" class="dropdown-btn dropdown-btn-danger">Delete</button>
+      </div>
+    </div>
+
+    <!-- Context menu (right-click) -->
+    <div id="contextMenu" class="context-menu hidden">
+      <div class="context-item" data-action="mute">Toggle Mute</div>
+      <div class="context-item" data-action="edit">Edit Feed</div>
+      <div class="context-item context-item-danger" data-action="delete">Delete Feed</div>
+    </div>
+
+    <!-- Custom confirm dialog -->
+    <div id="confirmDialog" class="confirm-dialog hidden">
+      <div class="confirm-overlay"></div>
+      <div class="confirm-content">
+        <div class="confirm-title">Confirm Delete</div>
+        <div class="confirm-message" id="confirmMessage"></div>
+        <div class="confirm-buttons">
+          <button id="confirmCancel" class="confirm-btn confirm-btn-cancel">Cancel</button>
+          <button id="confirmOk" class="confirm-btn confirm-btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="tree-viewer.js"></script>
+    <script src="management.js"></script>
+  </body>
+</html>
