@@ -360,7 +360,7 @@ function registerPostAuthIpcHandlers({
   });
 
   ipcMain.handle('app:getInfo', () => ({
-    version: app.getVersion() || '1.0.4',
+    version: app.getVersion() || '1.0.5',
     electronVersion: process.versions.electron,
     nodeVersion: process.versions.node,
     platform: process.platform,

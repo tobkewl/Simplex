@@ -1,4 +1,18 @@
 // Net Worth Overlay - Volledig herwerkt met iconen en breakdown
+let MIRAGE_STACKABLE_CURRENCY_BY_NAME = {};
+let MIRAGE_STACKABLE_CURRENCY_BY_KEY = {};
+let normalizeMirageStackableCurrencyKey = (value) => String(value || '').trim().toLowerCase();
+
+try {
+  ({
+    MIRAGE_STACKABLE_CURRENCY_BY_NAME,
+    MIRAGE_STACKABLE_CURRENCY_BY_KEY,
+    normalizeMirageStackableCurrencyKey,
+  } = require('../common/mirage-stackable-currencies'));
+} catch (_error) {
+  // Optional generated file; fall back to the built-in currency map.
+}
+
 const NETWORTH_ACTIVE_LEAGUE = 'Mirage';
 const QUEUE_VIEW_FILTER_STORAGE_KEY = 'networth.queueViewFilter';
 const TRACK_RUN_HISTORY_STORAGE_KEY = 'networth.trackRunHistory.v1';
@@ -178,6 +192,11 @@ const CURRENCY_ICONS = {
   'chance': 'https://web.poecdn.com/image/Art/2DItems/Currency/CurrencyUpgradeRandomly.png' // use CDN to avoid missing local asset
 };
 
+Object.entries(MIRAGE_STACKABLE_CURRENCY_BY_KEY).forEach(([key, entry]) => {
+  if (!key || !entry?.iconUrl || CURRENCY_ICONS[key]) return;
+  CURRENCY_ICONS[key] = entry.iconUrl;
+});
+
 // Format currency value
 function formatCurrency(value, currency = 'chaos', showIcon = false) {
   const formatted = value >= 1000 
@@ -293,7 +312,12 @@ function getCurrencyKeyFromItemName(itemName) {
     'Orb of Regret': 'regret',
     'Blessed Orb': 'blessed'
   };
-  return mapping[itemName] || null;
+  if (mapping[itemName]) return mapping[itemName];
+  const direct = MIRAGE_STACKABLE_CURRENCY_BY_NAME[itemName];
+  if (direct?.key) return direct.key;
+  const normalized = normalizeMirageStackableCurrencyKey(itemName);
+  if (normalized && MIRAGE_STACKABLE_CURRENCY_BY_KEY[normalized]) return normalized;
+  return null;
 }
 
 // Get CDN fallback URL for an item
@@ -310,6 +334,8 @@ function getCdnFallbackUrl(itemName) {
     'Orb of Alchemy': 'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lVcGdyYWRlVG9SYXJlIiwic2NhbGUiOjF9XQ/9817b9b70c/CurrencyUpgradeToRare.png',
     'Chromatic Orb': 'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxTb2NrZXRDb2xvdXJzIiwic2NhbGUiOjF9XQ/c7ece1f0b0/CurrencyRerollSocketColours.png'
   };
+  const direct = MIRAGE_STACKABLE_CURRENCY_BY_NAME[itemName];
+  if (direct?.iconUrl) return direct.iconUrl;
   return cdnUrls[itemName] || '';
 }
 

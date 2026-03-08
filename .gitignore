@@ -9,6 +9,7 @@ scripts/out/
 analysis-local/
 analysis-suite/out/
 analysis-suite/reports/
+/src/main/ipc/*-test-tools.js
 *.log
 *.tmp
 *.bak

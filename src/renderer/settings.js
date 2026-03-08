@@ -9,12 +9,10 @@ const showModRangesEl = document.getElementById('showModRanges');
 const showManagementByDefaultEl = null; // Removed
 const btnConnect = document.getElementById('btnConnect');
 const btnLogin = document.getElementById('btnLogin');
-const btnTest = document.getElementById('btnTest');
 const feedsListEl = document.getElementById('feedsList');
 const btnLogs = document.getElementById('btnLogs');
 const btnClearData = document.getElementById('btnClearData');
 const statusLine = document.getElementById('statusLine');
-const btnAddTestItem = document.getElementById('btnAddTestItem');
 const btnShowManagement = null; // Removed
 const clientLogPathInput = document.getElementById('clientLogPathInput');
 const btnBrowseClientLog = document.getElementById('btnBrowseClientLog');
@@ -68,7 +66,6 @@ const buildLiveOAuthStatus = document.getElementById('buildLiveOAuthStatus');
 const buildLiveOAuthDetails = document.getElementById('buildLiveOAuthDetails');
 const btnBuildOAuthAuthorize = document.getElementById('btnBuildOAuthAuthorize');
 const btnBuildCheckOAuthStatus = document.getElementById('btnBuildCheckOAuthStatus');
-const btnTestAPI = document.getElementById('btnTestAPI');
 const linkedAccountStatus = document.getElementById('linkedAccountStatus');
 const btnUnlinkAccount = document.getElementById('btnUnlinkAccount');
 const unlinkModal = document.getElementById('unlinkModal');
@@ -782,7 +779,6 @@ function attachTabListeners() {
                 console.error('[SETTINGS] Tab switch check login status failed:', err);
               });
             }
-            checkOverlayVisibilityAndUpdateButton();
           }, 100);
         } else if (targetTab === 'stash' || targetTab === 'build') {
           console.log('[SETTINGS] Switched to tab with OAuth section, checking OAuth status...');
@@ -845,11 +841,6 @@ window.settingsAPI.onSwitchTab((tab) => {
   if (tabButton) {
     tabButton.click();
     // The click handler will trigger the status checks
-    if (targetTab === 'trade') {
-      setTimeout(() => {
-        checkOverlayVisibilityAndUpdateButton();
-      }, 200);
-    }
   }
 });
 
@@ -1797,7 +1788,7 @@ async function loadAppInfo() {
   try {
     const appInfo = await window.settingsAPI.getAppInfo();
     if (appInfo) {
-      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.4';
+      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.5';
     }
     
     // Load log path
@@ -1809,34 +1800,6 @@ async function loadAppInfo() {
     }
   } catch (err) {
     console.error('[SETTINGS] Failed to load app info:', err);
-  }
-}
-
-// Check overlay visibility and update button state
-async function checkOverlayVisibilityAndUpdateButton() {
-  if (!btnTest) return;
-  try {
-    const isVisible = await window.settingsAPI.isOverlayVisible();
-    updateTestButtonState(isVisible);
-  } catch (err) {
-    console.error('[SETTINGS] Failed to check overlay visibility:', err);
-    updateTestButtonState(false);
-  }
-}
-
-// Update test button state based on overlay visibility
-function updateTestButtonState(isVisible) {
-  if (!btnTest) return;
-  if (isVisible) {
-    btnTest.disabled = true;
-    btnTest.style.opacity = '0.5';
-    btnTest.style.cursor = 'not-allowed';
-    btnTest.textContent = 'Test Overlay Active';
-  } else {
-    btnTest.disabled = false;
-    btnTest.style.opacity = '1';
-    btnTest.style.cursor = 'pointer';
-    btnTest.textContent = 'Show Test Overlay';
   }
 }
 
@@ -1984,37 +1947,6 @@ function attachAllButtonListeners() {
           buildLiveOAuthDetails.style.color = 'rgba(239, 154, 154, 0.9)';
         }
       }
-    });
-  }
-
-  if (btnTestAPI) {
-    btnTestAPI.style.display = 'none';
-  }
-
-  if (btnTest) {
-    btnTest.addEventListener('click', async () => {
-      const isVisible = await window.settingsAPI.isOverlayVisible();
-      if (!isVisible) {
-        window.settingsAPI.testOverlay();
-        // Update button state after a short delay
-        setTimeout(() => {
-          checkOverlayVisibilityAndUpdateButton();
-        }, 500);
-      }
-    });
-    
-    // Check overlay visibility on load
-    checkOverlayVisibilityAndUpdateButton();
-    
-    // Listen for overlay visibility changes
-    window.settingsAPI.onOverlayVisibilityChanged((visible) => {
-      updateTestButtonState(visible);
-    });
-  }
-
-  if (btnAddTestItem) {
-    btnAddTestItem.addEventListener('click', () => {
-      window.settingsAPI.addTestItem();
     });
   }
 

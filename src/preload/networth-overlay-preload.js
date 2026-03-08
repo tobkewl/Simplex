@@ -1,5 +1,18 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const { setupAccentTheme } = require('./theme');
+let MIRAGE_STACKABLE_CURRENCY_BY_NAME = {};
+let MIRAGE_STACKABLE_CURRENCY_BY_KEY = {};
+let normalizeMirageStackableCurrencyKey = (value) => String(value || '').trim().toLowerCase();
+
+try {
+  ({
+    MIRAGE_STACKABLE_CURRENCY_BY_NAME,
+    MIRAGE_STACKABLE_CURRENCY_BY_KEY,
+    normalizeMirageStackableCurrencyKey,
+  } = require('../common/mirage-stackable-currencies'));
+} catch (_error) {
+  // Optional generated file; fall back to the built-in currency map.
+}
 
 setupAccentTheme();
 
@@ -93,7 +106,19 @@ function getRate(currencyKey, rates = DEFAULT_CURRENCY_RATES) {
 }
 
 function getCurrencyKeyFromName(name, typeLine) {
-  return CURRENCY_NAME_TO_KEY[name] || CURRENCY_NAME_TO_KEY[typeLine] || null;
+  if (CURRENCY_NAME_TO_KEY[name]) return CURRENCY_NAME_TO_KEY[name];
+  if (CURRENCY_NAME_TO_KEY[typeLine]) return CURRENCY_NAME_TO_KEY[typeLine];
+
+  const direct = MIRAGE_STACKABLE_CURRENCY_BY_NAME[name] || MIRAGE_STACKABLE_CURRENCY_BY_NAME[typeLine];
+  if (direct?.key) return direct.key;
+
+  const normalizedName = normalizeMirageStackableCurrencyKey(name);
+  if (normalizedName && MIRAGE_STACKABLE_CURRENCY_BY_KEY[normalizedName]) return normalizedName;
+
+  const normalizedTypeLine = normalizeMirageStackableCurrencyKey(typeLine);
+  if (normalizedTypeLine && MIRAGE_STACKABLE_CURRENCY_BY_KEY[normalizedTypeLine]) return normalizedTypeLine;
+
+  return null;
 }
 
 function toEpochMillis(input) {
@@ -109,7 +134,7 @@ function toTabIndex(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function toLegacyItem(item, index, league) {
+function toLegacyItem(item, index, league, rates) {
   const source = asObject(item) || {};
   const stackSize = Math.max(1, Math.floor(toNumber(source.stackSize, 1)));
   const tabIndex = toTabIndex(source.tabIndex ?? source.tab_index ?? source._tabIndex);
@@ -124,12 +149,17 @@ function toLegacyItem(item, index, league) {
     existingNetworth !== null &&
     Number.isFinite(Number(existingNetworth.value)) &&
     asString(existingNetworth.currency).length > 0;
+  const hasFallbackRate =
+    Boolean(currencyKey) &&
+    rates &&
+    typeof rates === 'object' &&
+    Object.prototype.hasOwnProperty.call(rates, String(currencyKey).toLowerCase());
   const value = hasExistingNetworth
     ? Number(existingNetworth.value)
-    : (currencyKey ? stackSize : 0);
+    : (hasFallbackRate ? stackSize : 0);
   const currency = hasExistingNetworth
     ? asString(existingNetworth.currency).toLowerCase()
-    : (currencyKey || 'chaos');
+    : (hasFallbackRate ? String(currencyKey).toLowerCase() : 'chaos');
 
   return {
     ...source,
@@ -294,9 +324,11 @@ function toLegacyScan(scan, fallbackLeague = null) {
       ...asArray(scan?.inventory?.items),
     ];
   }
-  const legacyItems = sourceItems.map((item, index) => toLegacyItem(item, index, scan?.league || fallbackLeague));
   const timestamp = toEpochMillis(scan?.scannedAt || scan?.timestamp);
   const currencyRates = normalizeCurrencyRates(scan?.currencyRates);
+  const legacyItems = sourceItems.map((item, index) =>
+    toLegacyItem(item, index, scan?.league || fallbackLeague, currencyRates)
+  );
   const { netWorth, converted } = toLegacyNetWorth(legacyItems, currencyRates);
   const tabDetails = toLegacyTabDetails(scan, legacyItems, timestamp, currencyRates);
   const partialReason = asString(scan?.partialReason) || null;

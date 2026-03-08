@@ -7,7 +7,6 @@ const { registerSettingsAndManagementIpc } = require('../ipc/settings-management
 const { registerRunSyncIpc } = require('../ipc/run-sync');
 const { registerWindowOverlayControlsIpc } = require('../ipc/window-overlay-controls');
 const { registerOverlaySiteActionsIpc } = require('../ipc/overlay-site-actions');
-const { registerOverlayTestToolsIpc } = require('../ipc/overlay-test-tools');
 const { registerBuildAndSettingsUtilityIpc, registerLiveOverlayBridgeIpc } = require('../ipc/ui-bridge');
 
 function registerCoreIpc({
@@ -129,16 +128,6 @@ function registerCoreIpc({
     buildHideoutClickScript,
     buildWhisperClickScript,
     ensurePoeScriptPath,
-  });
-
-  registerOverlayTestToolsIpc({
-    ipcMain,
-    logger,
-    ensureOverlayWindow,
-    getOverlayWindow,
-    setOverlayVisible,
-    updateOverlayMouse,
-    forwardToOverlay,
   });
 
   registerSettingsAndManagementIpc({

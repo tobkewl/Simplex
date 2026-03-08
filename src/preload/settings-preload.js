@@ -11,9 +11,6 @@ contextBridge.exposeInMainWorld('settingsAPI', {
   connectFeeds: (urls) => ipcRenderer.send('settings:connectFeeds', urls),
   connectFeedsV2: (feeds) => ipcRenderer.send('settings:connectFeedsV2', feeds),
   setOverlayLocked: (locked) => ipcRenderer.send('overlay:setLocked', locked),
-  testOverlay: () => ipcRenderer.send('overlay:test'),
-  addTestItem: () => ipcRenderer.send('overlay:addTestItem'),
-  addTestWhisper: () => ipcRenderer.send('overlay:addTestWhisper'),
   showManagement: () => ipcRenderer.send('management:show'),
   showWhispers: () => ipcRenderer.send('whispers:show'),
     browseClientLog: () => ipcRenderer.invoke('settings:browseClientLog'),
@@ -55,12 +52,6 @@ contextBridge.exposeInMainWorld('settingsAPI', {
   onFeedbackOpen: (cb) => {
     ipcRenderer.on('feedback:open', (_e, type) => {
       cb(type);
-    });
-  },
-  isOverlayVisible: () => ipcRenderer.invoke('overlay:isVisible'),
-  onOverlayVisibilityChanged: (cb) => {
-    ipcRenderer.on('overlay:visibilityChanged', (_e, visible) => {
-      cb(visible);
     });
   }
 });
