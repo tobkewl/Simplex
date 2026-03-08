@@ -1,6 +1,6 @@
 {
   "name": "simplex",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Simplex - Live Trade Feed Overlay",
   "main": "src/main.js",
   "scripts": {
@@ -40,6 +40,9 @@
       "!scripts/*.txt",
       "!scripts/*.md",
       "!**/analysis output/**",
+      "!**/spec/**",
+      "!**/__tests__/**",
+      "!**/fixtures/**",
       "!**/test/**",
       "!**/tests/**",
       "!**/*.log"

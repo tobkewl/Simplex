@@ -123,6 +123,7 @@ function createOverlayWindowFactories({
         nodeIntegration: false,
         sandbox: false,
         webSecurity: true,
+        backgroundThrottling: false,
       },
     });
 

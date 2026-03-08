@@ -778,16 +778,26 @@ function renderGuideSidebarHeader(summary, general) {
 let treeNodeMetaCacheByLeague = {}
 let treeNodeMetaLoadingByLeague = {}
 
-function normalizeLeagueId(value) {
-  if (typeof value !== 'string') return 'keepers'
+function normalizeLeagueId(value, fallback = 'keepers') {
+  if (typeof value !== 'string') return fallback
   const normalized = value.trim().toLowerCase()
-  if (!normalized) return 'keepers'
+  if (!normalized) return fallback
   if (normalized.includes('phrecia') || normalized.includes('phyrecia')) return 'phrecia'
-  return 'keepers'
+  if (normalized.includes('keeper')) return 'keepers'
+  if (normalized.includes('mirage')) return 'mirage'
+  return fallback
 }
 
 function resolveTreeDataPath(leagueId) {
-  return leagueId === 'phrecia' ? '../assets/tree-data-phrecia.json' : '../assets/tree-data.json'
+  if (leagueId === 'phrecia') return '../assets/tree-data-phrecia.json'
+  if (leagueId === 'keepers') return '../assets/tree-data-keepers.json'
+  return '../assets/tree-data.json'
+}
+
+function getLeagueLabel(leagueId) {
+  if (leagueId === 'phrecia') return 'Phrecia Event'
+  if (leagueId === 'keepers') return '3.27 Keepers League'
+  return '3.28 Mirage League'
 }
 
 function resolveAssetUrl(relativePath) {
@@ -1792,7 +1802,7 @@ function renderGuideOverview(meta, general, summary) {
   const infoItems = []
   const rawLeague = toString(general?.league)
   const leagueId = normalizeLeagueId(rawLeague)
-  const leagueLabel = leagueId === 'phrecia' ? 'Phrecia Event' : 'Keepers League'
+  const leagueLabel = getLeagueLabel(leagueId)
   infoItems.push({
     label: 'League',
     value: rawLeague ? leagueLabel : `${leagueLabel} (missing)`,

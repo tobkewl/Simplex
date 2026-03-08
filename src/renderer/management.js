@@ -81,6 +81,16 @@ const formatAllocateLabel = (nodeIds, state, renderer) => {
   return `Allocate ${names.map((n) => `'${n}'`).join(', ')}`;
 };
 
+function uniqueNodeIds(nodeIds) {
+  return Array.from(
+    new Set(
+      (Array.isArray(nodeIds) ? nodeIds : [])
+        .filter((id) => id != null)
+        .map((id) => String(id))
+    )
+  );
+}
+
 const SOCKET_IMG = {
   blue: '../assets/assets/skills/socket-blue.png',
   green: '../assets/assets/skills/socket-green.png',
@@ -409,6 +419,57 @@ function getAnchorRect(el) {
   return rect;
 }
 
+function getVirtualRectFromPosition(position, width, height) {
+  if (!position) return null;
+  const right = Number(position.right);
+  const top = Number(position.top);
+  if (!Number.isFinite(right) || !Number.isFinite(top)) return null;
+  return {
+    top,
+    left: window.innerWidth - right - width,
+    right: window.innerWidth - right,
+    bottom: top + height,
+    width,
+    height
+  };
+}
+
+function getNetWorthAnchorRect() {
+  const indicatorRect = getAnchorRect(networthIndicator);
+  if (indicatorRect) return indicatorRect;
+
+  const savedRect = getVirtualRectFromPosition(netWorthSettings.position, 48, 48);
+  if (savedRect) return savedRect;
+
+  const handleRect = getAnchorRect(dockingHandle);
+  if (handleRect) {
+    const indicatorHeight = 48;
+    const spacing = 8;
+    let top = handleRect.top - indicatorHeight - spacing;
+    if (top < 0) top = handleRect.bottom + spacing;
+    if (top + indicatorHeight > window.innerHeight) {
+      top = Math.max(0, window.innerHeight - indicatorHeight - 8);
+    }
+    return {
+      top,
+      left: handleRect.left,
+      right: handleRect.right,
+      bottom: top + indicatorHeight,
+      width: 48,
+      height: indicatorHeight
+    };
+  }
+
+  return {
+    top: 16,
+    left: window.innerWidth - 64,
+    right: window.innerWidth - 16,
+    bottom: 64,
+    width: 48,
+    height: 48
+  };
+}
+
 // Position net worth indicator above docking handle
 function positionNetWorthIndicator() {
   const handleRect = getAnchorRect(dockingHandle);
@@ -432,6 +493,7 @@ function positionNetWorthIndicator() {
       networthHoverZone.style.right = 'auto';
       networthHoverZone.style.transform = 'none';
     }
+    positionRunTimer();
     return;
   }
 
@@ -451,6 +513,7 @@ function positionNetWorthIndicator() {
       networthHoverZone.style.right = 'auto';
       networthHoverZone.style.transform = 'none';
     }
+    positionRunTimer();
     return;
   }
   
@@ -487,6 +550,7 @@ function positionNetWorthIndicator() {
     networthHoverZone.style.right = 'auto';
     networthHoverZone.style.transform = 'none';
   }
+  positionRunTimer();
 }
 
 // Position build indicator above net worth indicator
@@ -2090,11 +2154,27 @@ async function loadNetWorthIndicator() {
 
 // Update net worth indicator
 function updateNetWorthIndicator(scan) {
-  if (!scan || !scan.netWorth) {
+  if (!scan) {
     networthValue.textContent = '-';
     return;
   }
+
+  if (!scan.netWorth) {
+    networthValue.textContent = '-';
+    networthValue.classList.remove('loading');
+    return;
+  }
   
+  const scanRates = (scan && typeof scan.currencyRates === 'object' && scan.currencyRates)
+    ? scan.currencyRates
+    : null;
+  const divineRate = Number.isFinite(Number(scanRates?.divine)) && Number(scanRates.divine) > 0
+    ? Number(scanRates.divine)
+    : 200;
+  const exaltedRate = Number.isFinite(Number(scanRates?.exalted)) && Number(scanRates.exalted) > 0
+    ? Number(scanRates.exalted)
+    : 15;
+
   // Use converted value if available, otherwise calculate from raw values
   let chaos = 0;
   let divine = 0;
@@ -2107,14 +2187,16 @@ function updateNetWorthIndicator(scan) {
     chaos = scan.netWorth.chaos || 0;
     divine = scan.netWorth.divine || 0;
     // Convert other currencies to chaos
-    const totalChaos = chaos + ((divine || 0) * 200) + ((scan.netWorth.exalted || 0) * 15);
-    divine = totalChaos / 200;
-    chaos = totalChaos % 200;
+    const totalChaos = chaos + ((divine || 0) * divineRate) + ((scan.netWorth.exalted || 0) * exaltedRate);
+    divine = totalChaos / divineRate;
+    chaos = totalChaos;
   }
   
   // Display value according to currency display setting
   if (netWorthSettings.currencyDisplay === 'chaos') {
-    const totalChaos = chaos + (divine * 200);
+    const totalChaos = Number.isFinite(Number(scan?.converted?.chaos))
+      ? Number(scan.converted.chaos)
+      : (chaos + (divine * divineRate));
     if (totalChaos >= 1) {
       networthValue.textContent = `${Math.round(totalChaos)}c`;
     } else {
@@ -2152,6 +2234,16 @@ if (networthIndicator) {
         return;
       }
     }
+
+    if (runTimerIndicator && !runTimerIndicator.classList.contains('hidden')) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.managementAPI.toggleRunPause) {
+        window.managementAPI.toggleRunPause();
+      }
+      return;
+    }
+
     // Toggle overlay: close if visible, otherwise open
     window.managementAPI.isNetworthOverlayVisible().then((visible) => {
       if (visible) {
@@ -2385,6 +2477,8 @@ function dragNetWorth(e) {
     networthHoverZone.style.top = constrainedY + 'px';
     networthHoverZone.style.transform = 'none';
   }
+
+  positionRunTimer();
 }
 
 function endNetWorthDrag() {
@@ -3109,6 +3203,7 @@ async function updateBuildQuickPreview() {
     const nextIndex = progress.nextIndex;
     const nextNodeId = progress.nextNodeId;
     const highlightNodes = progress.highlightNodes;
+    const sectionTree = state?.guideTreeBySection?.[section.id] || null;
     updateQuestHint(quickPreviewQuestHint, previewLevel, highlightNodes.length);
     if (quickPreviewNodeLabel) {
       quickPreviewNodeLabel.dataset.nodeId = nextNodeId ? String(nextNodeId) : '';
@@ -3121,17 +3216,17 @@ async function updateBuildQuickPreview() {
     const treeRenderer = ensureQuickPreviewTreeRenderer();
     if (showTree && treeRenderer && renderNodes.length > 0) {
       treeRenderer.render(renderNodes, {
-        highlightNodeId: nextNodeId,
+        highlightNodeId: nextNodeId || null,
         highlightNodeIds: highlightNodes,
         className,
         showAllNodes: true,
         centerOnHighlight: true,
         viewMode: 'tree',
         transparentBackground: true,
-        
+        sectionHighlight: sectionTree?.highlight || null,
       });
       if (quickPreviewNodeLabel && highlightNodes.length > 0 && typeof treeRenderer.ensureLoaded === 'function') {
-        const pendingId = String(nextNodeId);
+        const pendingId = nextNodeId ? String(nextNodeId) : '';
         void treeRenderer.ensureLoaded().then(() => {
           if (!quickPreviewNodeLabel || quickPreviewNodeLabel.dataset.nodeId !== pendingId) return;
           quickPreviewNodeLabel.textContent = formatAllocateLabel(highlightNodes, state, treeRenderer);
@@ -3353,11 +3448,12 @@ async function showLevelUpPopup(level, options = {}) {
     return;
   }
 
-    const progress = buildTreeProgress(state, previewLevel, 'tree');
+  const progress = buildTreeProgress(state, previewLevel, 'tree');
   const nextIndex = progress.nextIndex;
   const nextNodeId = progress.nextNodeId;
-    const highlightNodes = progress.highlightNodes;
-    updateQuestHint(levelUpQuestHint, previewLevel, highlightNodes.length);
+  const highlightNodes = progress.highlightNodes;
+  const sectionTree = state?.guideTreeBySection?.[progress.section?.id] || null;
+  updateQuestHint(levelUpQuestHint, previewLevel, highlightNodes.length);
   const nodeLabel = formatAllocateLabel(highlightNodes, state, levelPopupRenderer);
 
   if (levelUpNodeLabel) {
@@ -3373,17 +3469,17 @@ async function showLevelUpPopup(level, options = {}) {
     const className = toString(state.general?.class || state.general?.className) || null;
     requestAnimationFrame(() => {
       renderer.render(renderNodes, {
-        highlightNodeId: nextNodeId,
+        highlightNodeId: nextNodeId || null,
         highlightNodeIds: highlightNodes,
         className,
         showAllNodes: true,
         centerOnHighlight: true,
         viewMode: 'tree',
         transparentBackground: true,
-        
+        sectionHighlight: sectionTree?.highlight || null,
       });
       if (levelUpNodeLabel && highlightNodes.length > 0 && typeof renderer.ensureLoaded === 'function') {
-        const pendingId = String(nextNodeId);
+        const pendingId = nextNodeId ? String(nextNodeId) : '';
         void renderer.ensureLoaded().then(() => {
           if (!levelUpNodeLabel || levelUpNodeLabel.dataset.nodeId !== pendingId) return;
           levelUpNodeLabel.textContent = formatAllocateLabel(highlightNodes, state, renderer);
@@ -3408,111 +3504,108 @@ async function showLevelUpPopup(level, options = {}) {
   refreshClickThroughState();
 }
 
-// Listen for scan updates (could come from IPC events)
-// In a real implementation you would have an event listener here for new scans
+// Poll for refreshed scan snapshots while the feed bar is open.
 setInterval(async () => {
   if (!feedBar.classList.contains('hidden')) {
     await loadNetWorthIndicator();
   }
-}, 30000); // Update elke 30 seconden
+}, 30000);
 
 // ============================================
 // RUN TIMER FUNCTIONALITY
 // ============================================
 
-const runTimerIndicator = document.getElementById('runTimerIndicator');
+const runTimerIndicator = document.getElementById('networthRunTimer');
 const runTimerText = document.getElementById('runTimerText');
-const runTimerProfit = document.getElementById('runTimerProfit');
+let runTimerState = {
+  remainingSeconds: null,
+  endsAt: null,
+  isPaused: false,
+};
+let runTimerInterval = null;
+let runTimerEndRequested = false;
 
-// Position run timer above networth indicator
 function positionRunTimer() {
-  if (!runTimerIndicator || runTimerIndicator.classList.contains('hidden')) return;
-
-  const indicatorRect = networthIndicator.getBoundingClientRect();
-  const timerHeight = 60; // Actual height of timer
-  const spacing = 12; // More spacing to prevent overlap
-
-  // Position so bottom of timer aligns with top of networth indicator
-  let top = indicatorRect.top - timerHeight - spacing;
-
-  // Ensure timer doesn't go outside screen
-  if (top < 0) {
-    top = indicatorRect.bottom + spacing;
-  }
-
-  if (top + timerHeight > window.innerHeight) {
-    top = Math.max(0, window.innerHeight - timerHeight - 8);
-  }
-
-  const right = window.innerWidth - indicatorRect.right;
-  runTimerIndicator.style.right = right + 'px';
-  runTimerIndicator.style.top = top + 'px';
+  return;
 }
 
 // Format time from seconds to MM:SS
 function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function getDisplayedRunTimerSeconds() {
+  if (runTimerState.isPaused || !Number.isFinite(runTimerState.endsAt)) {
+    return Math.max(0, Number(runTimerState.remainingSeconds) || 0);
+  }
+  return Math.max(0, Math.ceil((runTimerState.endsAt - Date.now()) / 1000));
+}
+
+function renderRunTimerFromState() {
+  if (!runTimerIndicator || !runTimerText) return;
+  const remainingSeconds = getDisplayedRunTimerSeconds();
+  runTimerText.textContent = formatTime(remainingSeconds);
+  runTimerText.className = 'networth-run-timer-text';
+  networthIndicator?.classList.remove('run-critical');
+  if (remainingSeconds <= 60) {
+    runTimerText.classList.add('critical');
+    networthIndicator?.classList.add('run-critical');
+  } else if (remainingSeconds <= 300) {
+    runTimerText.classList.add('warning');
+  }
+
+  if (!runTimerState.isPaused && remainingSeconds <= 0 && !runTimerEndRequested) {
+    runTimerEndRequested = true;
+    if (window.managementAPI.requestRunEnd) {
+      window.managementAPI.requestRunEnd();
+    }
+  }
+}
+
+function ensureRunTimerInterval() {
+  if (runTimerInterval) return;
+  runTimerInterval = setInterval(() => {
+    if (runTimerIndicator?.classList.contains('hidden')) return;
+    renderRunTimerFromState();
+  }, 250);
+}
+
+function stopRunTimerInterval() {
+  if (!runTimerInterval) return;
+  clearInterval(runTimerInterval);
+  runTimerInterval = null;
 }
 
 // Update run timer display
 function updateRunTimer(data) {
   if (!data || !runTimerIndicator) return;
 
-  const { remainingSeconds, profit } = data;
-
-  // Update timer text
-  if (runTimerText && typeof remainingSeconds === 'number') {
-    runTimerText.textContent = formatTime(remainingSeconds);
-
-    // Update color based on remaining time
-    runTimerText.className = 'timer-text';
-    if (remainingSeconds <= 60) {
-      runTimerText.classList.add('critical');
-    } else if (remainingSeconds <= 300) {
-      runTimerText.classList.add('warning');
-    }
+  if (typeof data.remainingSeconds === 'number') {
+    runTimerState.remainingSeconds = Math.max(0, data.remainingSeconds);
   }
+  runTimerState.endsAt = Number.isFinite(data.endsAt) ? data.endsAt : null;
+  runTimerState.isPaused = data.isPaused === true;
 
-  // Update profit
-  if (runTimerProfit && profit !== undefined && profit !== null) {
-    const profitValue = typeof profit === 'object' ? profit.totalChaos : profit;
-    let profitText = '-';
-
-    if (typeof profitValue === 'number') {
-      if (profit.totalDivine && profit.totalDivine >= 1) {
-        profitText = `+${profit.totalDivine.toFixed(1)}d`;
-      } else {
-        profitText = `+${Math.round(profitValue)}c`;
-      }
-
-      runTimerProfit.textContent = profitText;
-      runTimerProfit.className = 'timer-profit-small';
-      if (profitValue < 0) {
-        runTimerProfit.classList.add('negative');
-      }
-    } else {
-      runTimerProfit.textContent = '-';
-    }
-  }
-
-  // Update paused state styling
-  if (data.isPaused) {
+  if (runTimerState.isPaused) {
     runTimerIndicator.classList.add('paused');
   } else {
     runTimerIndicator.classList.remove('paused');
   }
-
-  // Position timer
-  positionRunTimer();
+  runTimerEndRequested = false;
+  showRunTimer();
+  renderRunTimerFromState();
 }
 
 // Show run timer
 function showRunTimer() {
   if (runTimerIndicator) {
     runTimerIndicator.classList.remove('hidden');
-    positionRunTimer();
+    networthIndicator?.classList.add('run-active');
+    ensureRunTimerInterval();
+    renderRunTimerFromState();
   }
 }
 
@@ -3521,20 +3614,23 @@ function hideRunTimer() {
   if (runTimerIndicator) {
     runTimerIndicator.classList.add('hidden');
   }
+  networthIndicator?.classList.remove('run-active');
+  networthIndicator?.classList.remove('run-critical');
+  runTimerState = {
+    remainingSeconds: null,
+    endsAt: null,
+    isPaused: false,
+  };
+  runTimerEndRequested = false;
+  stopRunTimerInterval();
 }
 
 // Reposition timer when networth indicator moves or window resizes
 window.addEventListener('resize', () => {
   positionNetWorthIndicator();
   positionDockingHandleHoverZone();
-  positionRunTimer();
   positionBuildQuickPreview();
 });
-
-// Initial positioning
-setTimeout(() => {
-  positionRunTimer();
-}, 100);
 
 // Listen for run timer events from networth overlay
 if (window.managementAPI.onRunTimerUpdate) {
@@ -3544,7 +3640,10 @@ if (window.managementAPI.onRunTimerUpdate) {
 }
 
 if (window.managementAPI.onRunStarted) {
-  window.managementAPI.onRunStarted(() => {
+  window.managementAPI.onRunStarted((data) => {
+    if (data) {
+      updateRunTimer(data);
+    }
     showRunTimer();
   });
 }
@@ -3555,20 +3654,6 @@ if (window.managementAPI.onRunEnded) {
   });
 }
 
-// Click on timer to pause/resume
-if (runTimerIndicator) {
-  runTimerIndicator.addEventListener('click', () => {
-    console.log('[MANAGEMENT] Run timer clicked - toggling pause');
-    // Send pause toggle to networth overlay
-    if (window.managementAPI.toggleRunPause) {
-      console.log('[MANAGEMENT] Calling toggleRunPause');
-      window.managementAPI.toggleRunPause();
-    } else {
-      console.error('[MANAGEMENT] toggleRunPause not available on managementAPI');
-    }
-  });
-
-  console.log('[MANAGEMENT] Run timer click listener attached successfully');
-} else {
+if (!runTimerIndicator) {
   console.error('[MANAGEMENT] Run timer indicator element not found!');
 }

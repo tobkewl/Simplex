@@ -13,6 +13,8 @@ function setupTray({
   getSettingsWindow,
   createWelcomeWindow,
   getWelcomeWindow,
+  createNetworthOverlayWindow,
+  getNetworthOverlayWindow,
   createBuildOverlayWindow,
   getBuildOverlayWindow,
   createManagementWindow,
@@ -127,7 +129,17 @@ function setupTray({
         }
       },
     },
-    { label: 'Stash (Under Construction)', enabled: false },
+    {
+      label: 'Stash',
+      click: () => {
+        const networthWindow = getNetworthOverlayWindow();
+        if (!networthWindow || networthWindow.isDestroyed()) createNetworthOverlayWindow();
+        else {
+          networthWindow.show();
+          networthWindow.focus();
+        }
+      },
+    },
     {
       label: 'Build',
       click: () => {

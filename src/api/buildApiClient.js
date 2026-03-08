@@ -6,6 +6,21 @@
 const fetch = require('node-fetch')
 const REQUEST_TIMEOUT_MS = 10000
 
+function parseRetryAfterMs(value) {
+  if (value === null || value === undefined) return null
+  const raw = String(value).trim()
+  if (!raw) return null
+
+  const numericSeconds = Number(raw)
+  if (Number.isFinite(numericSeconds) && numericSeconds >= 0) {
+    return Math.max(0, Math.round(numericSeconds * 1000))
+  }
+
+  const dateMs = Date.parse(raw)
+  if (!Number.isFinite(dateMs)) return null
+  return Math.max(0, dateMs - Date.now())
+}
+
 function resolveAuthApiBaseUrl() {
   if (process.env.SIMPLEX_AUTH_API_BASE_URL) {
     return process.env.SIMPLEX_AUTH_API_BASE_URL.replace(/\/$/, '')
@@ -24,6 +39,7 @@ class BuildApiClient {
     this.baseUrl = config.baseUrl || process.env.API_BASE_URL || 'https://simplex.gg/api/client'
     this.authApiBaseUrl = config.authApiBaseUrl || resolveAuthApiBaseUrl()
     this.authService = config.authService || null
+    this.cachedNetworthCurrencyExchange = null
   }
 
   /**
@@ -48,13 +64,14 @@ class BuildApiClient {
    * @private
    */
   async request(endpoint, options = {}, targetBaseUrl = null) {
+    const { suppressErrorLog = false, ...requestOptions } = options
     const primaryBaseUrl = targetBaseUrl || this.baseUrl
     const primaryUrl = `${primaryBaseUrl}${endpoint}`
     const makeHeaders = () => {
       const accessToken = this.authService?.getAccessToken?.()
       const headers = {
         'Content-Type': 'application/json',
-        ...options.headers,
+        ...requestOptions.headers,
       }
       if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`
@@ -64,9 +81,9 @@ class BuildApiClient {
 
     const buildUrl = (baseUrl) => `${baseUrl}${endpoint}`
     const makeFetchOptions = () => ({
-      ...options,
+      ...requestOptions,
       headers: makeHeaders(),
-      timeout: typeof options.timeout === 'number' ? options.timeout : REQUEST_TIMEOUT_MS,
+      timeout: typeof requestOptions.timeout === 'number' ? requestOptions.timeout : REQUEST_TIMEOUT_MS,
     })
 
     try {
@@ -102,7 +119,17 @@ class BuildApiClient {
           error?.error || `API request failed with status ${response.status}`,
           error?.details ? String(error.details) : null,
         ].filter(Boolean).join(': ')
-        throw new Error(message)
+        const requestError = new Error(message)
+        requestError.status = response.status
+        requestError.url = url
+
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After'))
+        if (retryAfterMs !== null) {
+          requestError.retryAfterMs = retryAfterMs
+          requestError.retryAfterAt = Date.now() + retryAfterMs
+        }
+
+        throw requestError
       }
 
       return await response.json()
@@ -118,7 +145,9 @@ class BuildApiClient {
         console.error('Cannot connect to API server at:', primaryUrl)
         throw new Error(`Cannot connect to website server. Make sure the dev server is running at ${primaryBaseUrl}`)
       }
-      console.error('API request failed:', error)
+      if (!suppressErrorLog) {
+        console.error('API request failed:', error)
+      }
       throw error
     }
   }
@@ -402,18 +431,140 @@ class BuildApiClient {
       throw new Error('endpoint is required')
     }
     const method = typeof options.method === 'string' ? options.method.toUpperCase() : 'GET'
+    const suppressErrorLog = options.suppressErrorLog === true
     let body = options.body
     if (body && typeof body !== 'string') {
       body = JSON.stringify(body)
     }
     return this.request('/poe/proxy', {
       method: 'POST',
+      suppressErrorLog,
       body: JSON.stringify({
         endpoint,
         method,
         body: body || null,
       }),
     }, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Price a networth item through website pricing services.
+   * @param {Object} payload
+   * @param {Object} payload.item
+   * @param {string} payload.league
+   * @param {Object} [payload.options]
+   */
+  async priceNetworthItem(payload = {}) {
+    return this.request('/networth/price-item', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Persist a manual networth pricing override through website services.
+   * @param {Object} payload
+   * @param {Object} payload.item
+   * @param {Object} payload.pricing
+   * @param {string} payload.league
+   */
+  async saveNetworthManualPricing(payload = {}) {
+    return this.request('/networth/manual-pricing', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Persist a complete networth scan snapshot.
+   * @param {Object} payload
+   * @param {string} payload.league
+   * @param {string} [payload.realm]
+   * @param {Object} payload.scan
+   */
+  async saveNetworthStateSnapshot(payload = {}) {
+    return this.request('/networth/state/save', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Fetch latest persisted networth snapshot for scope.
+   * @param {Object} options
+   * @param {string} options.league
+   * @param {string} [options.realm]
+   */
+  async getNetworthStateLatest(options = {}) {
+    const params = new URLSearchParams()
+    if (typeof options.league === 'string' && options.league.trim()) {
+      params.set('league', options.league.trim())
+    }
+    if (typeof options.realm === 'string' && options.realm.trim()) {
+      params.set('realm', options.realm.trim())
+    }
+    const query = params.toString()
+    return this.request(`/networth/state/latest${query ? `?${query}` : ''}`, {}, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Fetch persisted networth snapshot history for scope.
+   * @param {Object} options
+   * @param {string} options.league
+   * @param {string} [options.realm]
+   * @param {number} [options.limit]
+   */
+  async getNetworthStateHistory(options = {}) {
+    const params = new URLSearchParams()
+    if (typeof options.league === 'string' && options.league.trim()) {
+      params.set('league', options.league.trim())
+    }
+    if (typeof options.realm === 'string' && options.realm.trim()) {
+      params.set('realm', options.realm.trim())
+    }
+    if (Number.isFinite(Number(options.limit)) && Number(options.limit) > 0) {
+      params.set('limit', String(Math.floor(Number(options.limit))))
+    }
+    const query = params.toString()
+    return this.request(`/networth/state/history${query ? `?${query}` : ''}`, {}, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Fetch Currency Exchange conversion rates maintained by website services.
+   * @param {Object} options
+   * @param {string} [options.realm]
+   * @param {string} [options.league]
+   * @param {boolean} [options.sync]
+   */
+  async getNetworthCurrencyExchangeRates(options = {}) {
+    const params = new URLSearchParams()
+    if (typeof options.realm === 'string' && options.realm.trim()) {
+      params.set('realm', options.realm.trim())
+    }
+    if (typeof options.league === 'string' && options.league.trim()) {
+      params.set('league', options.league.trim())
+    }
+    if (options.sync === true) {
+      params.set('sync', '1')
+    }
+    const query = params.toString()
+    const payload = await this.request(`/networth/currency-exchange${query ? `?${query}` : ''}`, {}, this.getOAuthApiBaseUrl())
+    this.cachedNetworthCurrencyExchange = payload
+    return payload
+  }
+
+  /**
+   * Fetch networth pricing selection config maintained by website services.
+   */
+  async getNetworthPricingConfig() {
+    return this.request('/networth/pricing-config', {}, this.getOAuthApiBaseUrl())
+  }
+
+  /**
+   * Read the last Currency Exchange payload fetched from website services.
+   */
+  getCachedNetworthCurrencyExchangeRates() {
+    return this.cachedNetworthCurrencyExchange
   }
 }
 

@@ -16,17 +16,11 @@
     <!-- Docking handle hover zone - invisible area for hover detection -->
     <div id="dockingHandleHoverZone" class="hover-zone"></div>
 
-    <!-- Run timer displayed above the net worth indicator during an active run -->
-    <div id="runTimerIndicator" class="run-timer-indicator hidden" title="Click to pause/resume run">
-      <div class="timer-display">
-        <span class="timer-icon">⏱</span>
-        <span class="timer-text" id="runTimerText">60:00</span>
-      </div>
-      <div class="timer-profit-small" id="runTimerProfit">-</div>
-    </div>
-
     <!-- Net worth indicator shown above the docking handle -->
-    <div id="networthIndicator" class="networth-indicator hidden" title="Click to open Net Worth Tracker. Hold Alt to drag and reposition.">
+    <div id="networthIndicator" class="networth-indicator hidden" title="Click to open Stash. Hold Alt to drag and reposition.">
+      <div id="networthRunTimer" class="networth-run-timer hidden" title="Click to pause/resume run">
+        <span class="networth-run-timer-text" id="runTimerText">60:00</span>
+      </div>
       <img src="../assets/currency/divine.png" class="networth-icon-img" alt="Divine Orb" id="networthIconImg" />
       <div class="networth-value" id="networthValue">-</div>
     </div>

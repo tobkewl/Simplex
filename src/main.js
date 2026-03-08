@@ -24,6 +24,7 @@ const { registerAppLifecycleHandlers } = require('./main/bootstrap/app-lifecycle
 const { registerCoreIpc } = require('./main/bootstrap/ipc-registration');
 const { registerSettingsWindowControlsIpc } = require('./main/ipc/settings-window-controls');
 const { registerPostAuthIpcHandlers } = require('./main/ipc/post-auth-handlers');
+const { registerNetworthIpcHandlers } = require('./main/ipc/networth-handlers');
 
 // Auth integration
 const { initializeAuth, requireAuth, getAuth } = require('./services/authIntegration');
@@ -142,58 +143,6 @@ const {
   getAuth,
   logger,
 });
-
-const NETWORTH_FEATURE_DISABLED_MESSAGE =
-  'Stash features are disabled in this open-source client build.';
-
-function registerNetworthDisabledIpcHandlers() {
-  const defaults = {
-    'networth:getLeagues': [],
-    'networth:getStashTabs': [],
-    'networth:scanStashes': {
-      success: false,
-      error: NETWORTH_FEATURE_DISABLED_MESSAGE,
-      scan: null,
-      comparison: null,
-    },
-    'networth:getLastScan': null,
-    'networth:getScanHistory': [],
-    'networth:getCachedStashTabs': {
-      numTabs: 0,
-      tabs: [],
-      rateLimited: false,
-      retryAt: null,
-      timestamp: null,
-    },
-    'networth:getLastLeague': null,
-    'networth:setLastLeague': false,
-    'networth:startRun': { success: false, error: NETWORTH_FEATURE_DISABLED_MESSAGE },
-    'networth:stopRun': { success: false, error: NETWORTH_FEATURE_DISABLED_MESSAGE },
-    'networth:getRuns': [],
-    'networth:getActiveRun': null,
-    'networth:priceItem': { success: false, error: NETWORTH_FEATURE_DISABLED_MESSAGE },
-    'networth:getPricingQueue': [],
-    'networth:resumePricingQueue': false,
-    'networth:getTaskQueue': { pricing: [], scan: [] },
-    'networth:removePricingQueueItem': false,
-    'networth:clearPricingQueue': false,
-    'networth:enqueuePricingItems': { queued: 0, error: NETWORTH_FEATURE_DISABLED_MESSAGE },
-    'networth:saveManualPricing': { success: false, error: NETWORTH_FEATURE_DISABLED_MESSAGE },
-    'networth:enqueueScanTask': null,
-    'networth:getScanQueue': [],
-    'networth:removeScanQueueItem': false,
-    'networth:clearScanQueue': false,
-    'networth:savePricingOverride': false,
-    'networth:getPricingOverride': null,
-  };
-  for (const [channel, value] of Object.entries(defaults)) {
-    try {
-      ipcMain.removeHandler(channel);
-    } catch {}
-    ipcMain.handle(channel, async () => value);
-  }
-  logger.info('networth:ipc-disabled', { channels: Object.keys(defaults).length });
-}
 
 function shouldWatchClientLog(currentSettings) {
   if (!currentSettings?.clientLogPath) return false;
@@ -798,7 +747,14 @@ app.whenReady().then(async () => {
   authService = authContext.authService;
   apiClient = authContext.apiClient;
 
-  registerNetworthDisabledIpcHandlers();
+  registerNetworthIpcHandlers({
+    ipcMain,
+    logger,
+    getApiClient: () => apiClient,
+    getSettings: () => settings,
+    saveSettings,
+    enableDevWebsiteFeatures: true,
+  });
 
   registerPostAuthIpcHandlers({
     ipcMain,
@@ -886,6 +842,8 @@ app.whenReady().then(async () => {
       getSettingsWindow: () => settingsWindow,
       createWelcomeWindow,
       getWelcomeWindow: () => welcomeWindow,
+      createNetworthOverlayWindow,
+      getNetworthOverlayWindow: () => networthOverlayWindow,
       createBuildOverlayWindow,
       getBuildOverlayWindow: () => buildOverlayWindow,
       createManagementWindow,

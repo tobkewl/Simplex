@@ -24,6 +24,8 @@ const clientLogStatusIcon = document.getElementById('clientLogStatusIcon');
 const clientLogStatusText = document.getElementById('clientLogStatusText');
 const netWorthCurrencyDisplay = document.getElementById('netWorthCurrencyDisplay');
 const netWorthVisibility = document.getElementById('netWorthVisibility');
+const netWorthAutoSyncOnOpen = document.getElementById('netWorthAutoSyncOnOpen');
+const netWorthPricingListingMode = document.getElementById('netWorthPricingListingMode');
 const netWorthLocked = null; // Removed
 const dockingHandleVisibility = document.getElementById('dockingHandleVisibility');
 const buildDockVisibility = document.getElementById('buildDockVisibility');
@@ -107,6 +109,24 @@ let controllerTypeValue = 'auto';
 let publicBaseUrlCache = null;
 let publicOAuthUrlCache = null;
 let liveTrackingToggleBusy = false;
+const NETWORTH_LISTING_MODES = new Set([
+  'instant_buyout_and_in_person',
+  'instant_buyout',
+  'in_person_online_in_league',
+  'in_person_online',
+  'any',
+]);
+
+function normalizeNetWorthListingMode(value) {
+  const normalized = typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+    : '';
+  if (normalized === 'available') return 'instant_buyout_and_in_person';
+  if (normalized === 'securable') return 'instant_buyout';
+  if (normalized === 'onlineleague') return 'in_person_online_in_league';
+  if (normalized === 'online') return 'in_person_online';
+  return NETWORTH_LISTING_MODES.has(normalized) ? normalized : 'instant_buyout';
+}
 
 function isValidFeedUrl(value) {
   if (typeof value !== 'string') return false;
@@ -255,6 +275,8 @@ async function updateSettingsInstant() {
   if (overlayLockedEl) partial.overlayLocked = !!overlayLockedEl.checked;
   if (netWorthCurrencyDisplay) partial.netWorthCurrencyDisplay = netWorthCurrencyDisplay.value;
   if (netWorthVisibility) partial.netWorthVisibility = netWorthVisibility.value;
+  if (netWorthAutoSyncOnOpen) partial.netWorthAutoSyncOnOpen = !!netWorthAutoSyncOnOpen.checked;
+  if (netWorthPricingListingMode) partial.netWorthPricingListingMode = normalizeNetWorthListingMode(netWorthPricingListingMode.value);
   if (dockingHandleVisibility) partial.dockingHandleVisibility = dockingHandleVisibility.value;
   if (buildDockVisibility) partial.buildDockVisibility = buildDockVisibility.value;
   if (buildLevelDetection) partial.buildLevelDetection = buildLevelDetection.value;
@@ -555,6 +577,7 @@ function attachInstantUpdateListeners() {
   if (displayFeedNameEl) displayFeedNameEl.addEventListener('change', updateSettingsInstant);
   if (overlayLockedEl) overlayLockedEl.addEventListener('change', updateSettingsInstant);
   if (netWorthCurrencyDisplay) netWorthCurrencyDisplay.addEventListener('change', updateSettingsInstant);
+  if (netWorthPricingListingMode) netWorthPricingListingMode.addEventListener('change', updateSettingsInstant);
   if (netWorthVisibility) {
     netWorthVisibility.addEventListener('change', () => {
       if (stashEnabled) {
@@ -593,6 +616,20 @@ function attachInstantUpdateListeners() {
       await window.settingsAPI.set({ liveTrackingDefaultVisibility: visibility });
       const s = await window.settingsAPI.get();
       renderLiveTrackingStatus(s);
+    });
+  }
+  if (netWorthAutoSyncOnOpen) {
+    netWorthAutoSyncOnOpen.addEventListener('change', async () => {
+      if (netWorthAutoSyncOnOpen.checked) {
+        const confirmed = window.confirm(
+          'Enabling automatic stash sync can quickly hit Path of Exile API rate limits. Do you want to enable it anyway?'
+        );
+        if (!confirmed) {
+          netWorthAutoSyncOnOpen.checked = false;
+          return;
+        }
+      }
+      await updateSettingsInstant();
     });
   }
   if (liveTrackingEnabled) {
@@ -1425,9 +1462,15 @@ function renderFeeds() {
     } else {
       netWorthVisibility.value = 'disabled'; // default
     }
+    if (netWorthAutoSyncOnOpen) {
+      netWorthAutoSyncOnOpen.checked = s.netWorthAutoSyncOnOpen === true;
+    }
+    if (netWorthPricingListingMode) {
+      netWorthPricingListingMode.value = normalizeNetWorthListingMode(s.netWorthPricingListingMode);
+    }
     if (stashEnabled) {
-      stashEnabled.checked = false;
-      stashEnabled.disabled = true;
+      stashEnabled.checked = netWorthVisibility.value !== 'disabled';
+      stashEnabled.disabled = false;
     }
     // netWorthLocked removed
     
@@ -1587,9 +1630,15 @@ function renderFeeds() {
       if (newSettings.netWorthVisibility === 'hover' || newSettings.netWorthVisibility === 'always' || newSettings.netWorthVisibility === 'disabled') {
         netWorthVisibility.value = newSettings.netWorthVisibility;
       }
+      if (netWorthAutoSyncOnOpen && typeof newSettings.netWorthAutoSyncOnOpen === 'boolean') {
+        netWorthAutoSyncOnOpen.checked = newSettings.netWorthAutoSyncOnOpen;
+      }
+      if (netWorthPricingListingMode && typeof newSettings.netWorthPricingListingMode === 'string') {
+        netWorthPricingListingMode.value = normalizeNetWorthListingMode(newSettings.netWorthPricingListingMode);
+      }
       if (stashEnabled) {
-        stashEnabled.checked = false;
-        stashEnabled.disabled = true;
+        stashEnabled.checked = netWorthVisibility.value !== 'disabled';
+        stashEnabled.disabled = false;
       }
       // netWorthLocked removed
       // Docking Handle visibility
@@ -1748,7 +1797,7 @@ async function loadAppInfo() {
   try {
     const appInfo = await window.settingsAPI.getAppInfo();
     if (appInfo) {
-      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.0';
+      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.3';
     }
     
     // Load log path

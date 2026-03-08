@@ -14,6 +14,7 @@ const SKILLS_PER_ORBIT = [1, 6, 16, 16, 40, 72, 72]
 const BLOODLINE_MIN_RADIUS = 624
 const BLOODLINE_SCALE = 1.44
 const BLOODLINE_VIEW_ZOOM_BOOST = BLOODLINE_SCALE
+const RELIQUARIAN_VIEW_ZOOM_BOOST = 1.2
 
 const CLASSES = [
   { id: 0, name: 'Scion', groupId: '399', background: null },
@@ -195,6 +196,43 @@ function buildSpriteCoordsByFilename(coords) {
   return result
 }
 
+function getSheetVariant(fileName) {
+  const normalized = String(fileName || '').split('/').pop().split('?')[0]
+  const match = normalized.match(/-(\d+)\.[^.]+$/)
+  return {
+    name: normalized,
+    variant: match ? Number(match[1]) : -1,
+  }
+}
+
+function buildSheetVariantIndex(coords) {
+  const result = {
+    bloodline: 'bloodline-4.webp',
+    ascendancy: 'ascendancy-4.webp',
+  }
+
+  Object.values(coords || {}).forEach((value) => {
+    const sheet = value?.sheet
+    if (!sheet) return
+    const parsed = getSheetVariant(sheet)
+    if (!parsed.name) return
+    if (/^bloodline-\d+\.webp$/i.test(parsed.name)) {
+      const current = getSheetVariant(result.bloodline)
+      if (parsed.variant >= current.variant) {
+        result.bloodline = parsed.name
+      }
+    }
+    if (/^ascendancy-\d+\.webp$/i.test(parsed.name)) {
+      const current = getSheetVariant(result.ascendancy)
+      if (parsed.variant >= current.variant) {
+        result.ascendancy = parsed.name
+      }
+    }
+  })
+
+  return result
+}
+
 function normalizeAscName(value) {
   return String(value || '').trim().toLowerCase()
 }
@@ -267,6 +305,7 @@ class TreePreviewRenderer {
     this.loadedImages = new Map()
     this.spriteCoords = null
     this.spriteCoordsByFilename = null
+    this.sheetVariants = { bloodline: 'bloodline-4.webp' }
     this.treeData = null
     this.ready = false
     this.loading = false
@@ -369,8 +408,8 @@ class TreePreviewRenderer {
     const files = [
       BACKGROUND_TILE,
       'ascendancy-background-3.png',
-      'ascendancy-3.webp',
-      'bloodline-3.webp',
+      this.sheetVariants?.ascendancy || 'ascendancy-4.webp',
+      this.sheetVariants?.bloodline || 'bloodline-4.webp',
       'PSSkillFrameActive.png',
       'PSSkillFrame.png',
       'NotableFrameAllocated.png',
@@ -416,6 +455,7 @@ class TreePreviewRenderer {
       this.treeData = normalizeTreeData(treeDataRaw || {})
       this.spriteCoords = spriteCoords || null
       this.spriteCoordsByFilename = buildSpriteCoordsByFilename(this.spriteCoords)
+      this.sheetVariants = buildSheetVariantIndex(this.spriteCoords)
       await this.preloadImages()
       this.ready = true
     } finally {
@@ -464,6 +504,45 @@ class TreePreviewRenderer {
     if (node.isJewelSocket) return set.jewel
     if (node.isMastery) return set.mastery
     return set.small
+  }
+
+  isReliquarianStructuralNode(node) {
+    if (!node) return false
+    if (compactAscName(node.ascendancyName) !== 'reliquarian') return false
+    return node.isAscendancyStart === true || node.isMultipleChoice === true
+  }
+
+  getNodeVisualState(node, isAllocated) {
+    if (!isAllocated) {
+      return {
+        frameAllocated: false,
+        backdropAlpha: 0.35,
+        fillAlpha: 0.25,
+        frameAlpha: 0.55,
+        connectorAlpha: 0.25,
+        iconAlpha: 0.4,
+      }
+    }
+
+    if (this.isReliquarianStructuralNode(node)) {
+      return {
+        frameAllocated: false,
+        backdropAlpha: 0.28,
+        fillAlpha: 0.38,
+        frameAlpha: 0.82,
+        connectorAlpha: 0.35,
+        iconAlpha: 0.72,
+      }
+    }
+
+    return {
+      frameAllocated: true,
+      backdropAlpha: 0.7,
+      fillAlpha: 0.9,
+      frameAlpha: 1,
+      connectorAlpha: 0.85,
+      iconAlpha: 1,
+    }
   }
 
   installHoverHandlers() {
@@ -691,10 +770,9 @@ class TreePreviewRenderer {
     const minRadius = MIN_OVERRIDES[target] ?? BASE_MIN_RADIUS
     const scale = SCALE_OVERRIDES[target] ?? 1
 
-    if (startNode && startNode.group != null) {
+    if (startNode) {
       let maxDist = 0
       nodes.forEach((node) => {
-        if (node.group !== startNode.group) return
         const dist = Math.hypot(node.x - startNode.x, node.y - startNode.y)
         maxDist = Math.max(maxDist, dist)
       })
@@ -766,6 +844,19 @@ class TreePreviewRenderer {
     if (!cluster) return
 
     const candidates = []
+    const classKey = safeName ? `Classes${safeName}` : null
+    const spriteCoords = classKey
+      ? this.spriteCoords?.[classKey] || this.spriteCoordsByFilename?.[classKey] || null
+      : null
+    if (spriteCoords?.sheet) {
+      candidates.push({
+        type: 'sprite',
+        sheet: spriteCoords.sheet,
+        coords: spriteCoords,
+        scale: 1,
+        alpha: 0.22,
+      })
+    }
     if (safeName) {
       const scaleOverrides = {
         necromancer: 0.8,
@@ -777,11 +868,21 @@ class TreePreviewRenderer {
       }
       const normalized = normalizeAscName(safeName)
       const scaleOverride = scaleOverrides[normalized] ?? 1
-      candidates.push({ name: `Classes${safeName}.png`, scale: scaleOverride, alpha: 0.22 })
+      candidates.push({ type: 'image', name: `Classes${safeName}.png`, scale: scaleOverride, alpha: 0.22 })
     }
 
     let picked = null
     for (const candidate of candidates) {
+      if (candidate.type === 'sprite') {
+        const url = this.assetUrl(candidate.sheet)
+        const img = this.loadedImages.get(url)
+        if (img) {
+          picked = { img, ...candidate }
+          break
+        }
+        this.queueRenderOnLoad(url)
+        continue
+      }
       const url = this.assetUrl(candidate.name)
       const img = this.loadedImages.get(url)
       if (img) {
@@ -793,18 +894,37 @@ class TreePreviewRenderer {
     if (!picked) return
 
     const { img, scale, alpha } = picked
-    const referenceSize = Math.max(img.width, img.height)
-    const targetDiameter = cluster.radius * 2 + 140
-    const baseScale = targetDiameter / referenceSize
-    const finalScale = baseScale * scale
-    const bgWidth = img.width * finalScale * zoom
-    const bgHeight = img.height * finalScale * zoom
     const screenX = (cluster.x - centerX) * zoom + offsetX
     const screenY = (cluster.y - centerY) * zoom + offsetY
 
     ctx.save()
     ctx.globalAlpha = alpha
-    ctx.drawImage(img, screenX - bgWidth / 2, screenY - bgHeight / 2, bgWidth, bgHeight)
+    if (picked.type === 'sprite' && picked.coords) {
+      const referenceSize = Math.max(picked.coords.w, picked.coords.h)
+      const targetDiameter = cluster.radius * 2 + 140
+      const finalScale = (targetDiameter / referenceSize) * scale
+      const bgWidth = picked.coords.w * finalScale * zoom
+      const bgHeight = picked.coords.h * finalScale * zoom
+      ctx.drawImage(
+        img,
+        picked.coords.x,
+        picked.coords.y,
+        picked.coords.w,
+        picked.coords.h,
+        screenX - bgWidth / 2,
+        screenY - bgHeight / 2,
+        bgWidth,
+        bgHeight
+      )
+    } else {
+      const referenceSize = Math.max(img.width, img.height)
+      const targetDiameter = cluster.radius * 2 + 140
+      const baseScale = targetDiameter / referenceSize
+      const finalScale = baseScale * scale
+      const bgWidth = img.width * finalScale * zoom
+      const bgHeight = img.height * finalScale * zoom
+      ctx.drawImage(img, screenX - bgWidth / 2, screenY - bgHeight / 2, bgWidth, bgHeight)
+    }
     ctx.restore()
   }
 
@@ -812,8 +932,13 @@ class TreePreviewRenderer {
     const sourceName = this.selectedBloodlineName || this.selectedAscendancyName
     const key = resolveBloodlineKey(sourceName)
     const cluster = key ? this.getBloodlineCluster(key) : null
+    const classKey = key ? `Classes${key}` : null
+    const coords = classKey
+      ? this.spriteCoords?.[classKey] || this.spriteCoordsByFilename?.[classKey] || null
+      : null
 
-    const sheetUrl = this.assetUrl('bloodline-3.webp')
+    const sheetName = coords?.sheet || this.sheetVariants.bloodline || 'bloodline-4.webp'
+    const sheetUrl = this.assetUrl(sheetName)
     const sheet = this.loadedImages.get(sheetUrl)
     if (!sheet) {
       this.queueRenderOnLoad(sheetUrl)
@@ -831,8 +956,6 @@ class TreePreviewRenderer {
       return
     }
 
-    const classKey = `Classes${key}`
-    const coords = this.spriteCoords?.[classKey] || this.spriteCoordsByFilename?.[classKey] || null
     if (!coords) {
       const scale = 1.05 * BLOODLINE_SCALE
       const bgWidth = sheet.width * scale * zoom
@@ -1115,7 +1238,15 @@ class TreePreviewRenderer {
       const factor = BLOODLINE_ZOOM_CAP_OVERRIDES[key] ?? BLOODLINE_ZOOM_CAP_OVERRIDES[rawKey] ?? 1
       maxZoomCap = Math.min(this.maxZoom, maxZoomCap * factor)
     }
-    const zoom = Math.max(this.minZoom, Math.min(maxZoomCap, baseZoom * this.zoomFactor))
+    const isReliquarianAscendancyView = viewMode === 'ascendancy'
+      && compactAscName(this.activeAscendancyName) === 'reliquarian'
+    if (isReliquarianAscendancyView) {
+      maxZoomCap = Math.min(this.maxZoom, maxZoomCap * RELIQUARIAN_VIEW_ZOOM_BOOST)
+    }
+    const zoomTarget = baseZoom
+      * this.zoomFactor
+      * (isReliquarianAscendancyView ? RELIQUARIAN_VIEW_ZOOM_BOOST : 1)
+    const zoom = Math.max(this.minZoom, Math.min(maxZoomCap, zoomTarget))
     this.lastZoom = zoom
     const highlightId = this.highlightNodeId != null
       ? String(this.highlightNodeId)
@@ -1237,7 +1368,8 @@ class TreePreviewRenderer {
     ordered.forEach(({ id, node, x, y }) => {
       const size = this.getNodeScreenSize(node, zoom)
       const isAllocated = idSet.has(id)
-      const frame = this.getNodeFrame(node, isAllocated)
+      const visualState = this.getNodeVisualState(node, isAllocated)
+      const frame = this.getNodeFrame(node, visualState.frameAllocated)
       const frameUrl = this.assetUrl(frame)
       const frameImg = this.loadedImages.get(frameUrl)
       const isHighlight =
@@ -1317,7 +1449,7 @@ class TreePreviewRenderer {
         backdrop.addColorStop(1, 'rgba(6, 8, 12, 0)')
         ctx.save()
         ctx.fillStyle = backdrop
-        ctx.globalAlpha = isAllocated ? 0.7 : 0.35
+        ctx.globalAlpha = visualState.backdropAlpha
         ctx.beginPath()
         ctx.arc(x, y, size * 0.6, 0, Math.PI * 2)
         ctx.fill()
@@ -1327,14 +1459,14 @@ class TreePreviewRenderer {
         ctx.beginPath()
         ctx.arc(x, y, innerRadius, 0, Math.PI * 2)
         ctx.fillStyle = bgColor
-        ctx.globalAlpha = isAllocated ? 0.9 : 0.25
+        ctx.globalAlpha = visualState.fillAlpha
         ctx.fill()
         ctx.restore()
       }
 
       if (frameImg) {
         ctx.save()
-        ctx.globalAlpha = isAllocated ? 1 : 0.55
+        ctx.globalAlpha = visualState.frameAlpha
         ctx.drawImage(frameImg, x - size / 2, y - size / 2, size, size)
         ctx.restore()
       } else {
@@ -1350,7 +1482,7 @@ class TreePreviewRenderer {
       if (hasLinks && connectorImg) {
         const hubSize = Math.min(size * 0.65, size - 8)
         ctx.save()
-        ctx.globalAlpha = isAllocated ? 0.85 : 0.25
+        ctx.globalAlpha = visualState.connectorAlpha
         ctx.drawImage(connectorImg, x - hubSize / 2, y - hubSize / 2, hubSize, hubSize)
         ctx.restore()
       }
@@ -1369,7 +1501,7 @@ class TreePreviewRenderer {
       const iconScale = node.isKeystone ? 0.55 : node.isNotable ? 0.6 : node.isJewelSocket ? 0.6 : 0.65
       const iconSize = size * iconScale
       ctx.save()
-      ctx.globalAlpha = isAllocated ? 1 : 0.4
+      ctx.globalAlpha = visualState.iconAlpha
       ctx.drawImage(
         sheet,
         coords.x,

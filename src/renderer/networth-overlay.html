@@ -1,25 +1,277 @@
 <!doctype html>
-<html lang="en">
+<html>
   <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self';" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stash Feature</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://web.poecdn.com data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self';">
+    <title>Stash</title>
     <link rel="stylesheet" href="networth-overlay.css" />
   </head>
   <body>
-    <main class="placeholder-shell">
-      <h1>Stash Feature Not Included</h1>
-      <p>
-        Stash and net worth tooling is intentionally excluded from this open-source client release.
-      </p>
-      <p>
-        A redesigned implementation will ship in a later release.
-      </p>
-      <div class="actions">
-        <button id="btnClose" type="button">Close</button>
+    <div class="networth-overlay-container">
+      <!-- Header -->
+      <div class="overlay-header" id="overlayHeader">
+        <div class="header-title">
+          <span class="title-icon">$</span>
+          <span>Stash</span>
+        </div>
+        <div class="header-spacer"></div>
+                <div class="header-actions">
+          <div class="value-mode-toggle" id="valueModeToggle">
+            <button id="displayChaosBtn" class="value-mode-btn active" type="button">Chaos</button>
+            <button id="displayDivineBtn" class="value-mode-btn" type="button">Divines</button>
+          </div>
+          <select id="leagueSelect" class="league-select">
+            <option value="">Loading...</option>
+          </select>
+          <button id="queueBtn" class="btn btn-secondary queue-btn">Queue</button>
+          <div class="sync-split">
+            <button id="syncTabsBtn" class="btn btn-primary split-main">Sync tab</button>
+            <button id="syncDropdownBtn" class="btn btn-primary split-caret" aria-label="Sync options">&#9662;</button>
+            <div id="scanMenu" class="dropdown-menu">
+              <div class="dropdown-item dropdown-action" id="syncAllAction">Sync all</div>
+              <label class="dropdown-option" for="autoQueueUnpricedToggle">
+                <input type="checkbox" id="autoQueueUnpricedToggle">
+                <span>Auto-price unpriced after sync</span>
+              </label>
+              <div class="dropdown-item dropdown-action" id="queueUnpricedNowAction">Queue unpriced now</div>
+              <div class="dropdown-divider"></div>
+              <div class="dropdown-header">Select stash tabs</div>
+              <div id="scanMenuList" class="dropdown-list"></div>
+              <div class="dropdown-footer">
+                <button id="scanSelectedBtn" class="btn btn-primary btn-small">Sync selected</button>
+              </div>
+            </div>
+          </div>
+          <div class="sync-status idle" id="syncStatus" title="Not synced">
+            <span class="sync-status-icon" aria-hidden="true"></span>
+          </div>
+        </div>
       </div>
-    </main>
+
+      <!-- Main Layout -->
+      <div class="main-layout">
+        <!-- Left Sidebar - Stash Tabs -->
+        <div class="sidebar">
+          <div class="sidebar-header">
+            <div class="sidebar-header-title">Stash Tabs</div>
+            <div class="sidebar-sort-controls" id="tabSortControls">
+              <button class="sidebar-sort-btn active" data-tab-sort-key="value" type="button">Value</button>
+              <button class="sidebar-sort-btn" data-tab-sort-key="name" type="button">Name</button>
+              <button class="sidebar-sort-btn" data-tab-sort-key="items" type="button">Items</button>
+            </div>
+          </div>
+          <div class="stash-tabs-sidebar" id="stashTabsSidebar">
+            <!-- Stash tabs will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+          <!-- Tab Bar (Chrome-style) -->
+          <div class="view-tabs-bar" id="viewTabsBar">
+            <div class="view-tab active" data-tab-id="networth">
+              <span class="view-tab-icon">$</span>
+              <span class="view-tab-name">Stash</span>
+            </div>
+            <!-- Run tabs will be added here dynamically -->
+          </div>
+
+                    <!-- Top Section: Wealth Graph + Breakdown -->
+          <div id="itemsView" class="items-view">
+            <div class="top-section">
+              <!-- Wealth Graph -->
+              <div class="wealth-section">
+                <!-- Run Timer (appears above wealth section during active run) -->
+                <div class="wealth-run-timer" id="wealthRunTimer" style="display: none;">
+                  <span class="run-timer-icon">T</span>
+                  <span class="run-timer-text" id="runTimerText">60:00</span>
+                  <span class="run-timer-profit" id="runTimerProfit">-</span>
+                  <div class="run-timer-controls">
+                    <button id="pauseRunBtnInline" class="run-timer-btn" title="Pause/Resume">||</button>
+                    <button id="stopRunBtnInline" class="run-timer-btn run-timer-btn-danger" title="Stop">[]</button>
+                  </div>
+                </div>
+
+                <div class="wealth-header">
+                  <div class="wealth-title">Wealth</div>
+                  <div class="wealth-buttons">
+                    <button class="wealth-btn active" data-period="total">Total</button>
+                    <button class="wealth-btn" data-period="hourly">Hourly</button>
+                    <button class="wealth-btn" data-period="7days">7 Days</button>
+                  </div>
+                </div>
+                <div class="wealth-value-display">
+                  <div class="wealth-total" id="wealthTotal">-</div>
+                  <div class="wealth-delta" id="wealthDelta"></div>
+                </div>
+                <div class="chart-container">
+                  <canvas id="netWorthChart"></canvas>
+                </div>
+              </div>
+
+              <!-- Breakdown Section -->
+              <div class="breakdown-section">
+                <div class="breakdown-header">
+                  <div class="breakdown-title">Breakdown</div>
+                  <div class="breakdown-buttons">
+                    <button class="breakdown-btn active" data-view="divines">Value</button>
+                    <button class="breakdown-btn" data-view="percentage">Percentage</button>
+                  </div>
+                </div>
+                <div class="breakdown-list" id="breakdownList">
+                  <!-- Currency breakdown will be rendered here -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Controls Bar -->
+            <div class="controls-bar">
+              <div class="controls-left">
+                <input type="text" id="searchInput" class="search-input" placeholder="Q Search (regex supported)">
+                <button class="btn btn-secondary" id="filtersBtn">Filters</button>
+              </div>
+              <div class="controls-right">
+                <button id="runSmartPriceBtn" class="btn btn-secondary btn-small" type="button" style="display: none;">Smart price run loot</button>
+                <div class="selected-total" id="selectedTotal">Selected total: -</div>
+              </div>
+            </div>
+
+            <!-- Items Table -->
+            <div class="items-table-container">
+              <table class="items-table">
+                <thead>
+                  <tr>
+                    <th class="checkbox-col">
+                      <input type="checkbox" id="selectAllCheckbox" checked>
+                    </th>
+                    <th class="name-col sortable-col active" data-sort-key="name">Name</th>
+                    <th class="tab-col sortable-col" data-sort-key="tab">Tab</th>
+                    <th class="quantity-col sortable-col" data-sort-key="quantity">Quantity</th>
+                    <th class="price-col sortable-col" data-sort-key="price">Price</th>
+                    <th class="total-col sortable-col" data-sort-key="total">Total</th>
+                  </tr>
+                </thead>
+                <tbody id="itemsTableBody">
+                  <!-- Items will be rendered here -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="queueView" class="queue-view">
+            <div class="queue-header-row">
+              <div class="queue-title">Queue:</div>
+              <div class="queue-cooldown-status" id="queueCooldownStatus"></div>
+              <div class="queue-filters" role="tablist" aria-label="Queue filter">
+                <button class="queue-filter-btn active" id="queueFilterActiveBtn" data-queue-filter="active">Active</button>
+                <button class="queue-filter-btn" id="queueFilterHistoryBtn" data-queue-filter="history">History</button>
+              </div>
+              <div class="queue-actions">
+                <button class="btn btn-secondary btn-small" id="queueRefreshBtn">Refresh</button>
+                <button class="btn btn-secondary btn-small" id="queueClearBtn">Clear</button>
+              </div>
+            </div>
+            <div class="queue-table-container">
+              <table class="queue-table">
+                <thead>
+                  <tr>
+                    <th class="queue-type-col">Type</th>
+                    <th class="queue-name-col">Item / Tab</th>
+                    <th class="queue-league-col">League</th>
+                    <th class="queue-status-col">Status</th>
+                    <th class="queue-when-col">When</th>
+                    <th class="queue-result-col">Result</th>
+                    <th class="queue-action-col"></th>
+                  </tr>
+                </thead>
+                <tbody id="queueTableBody">
+                  <!-- Queue entries render here -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="confirmModalTitle">Confirm</h2>
+        </div>
+        <div class="modal-body">
+          <p id="confirmModalMessage">Are you sure?</p>
+          <p id="confirmModalDetails" class="confirm-modal-details" style="display: none;"></p>
+          <label id="confirmModalCheckboxRow" class="confirm-modal-checkbox" style="display: none;">
+            <input type="checkbox" id="confirmModalCheckbox">
+            <span id="confirmModalCheckboxLabel">Don't show again</span>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button id="confirmModalCancel" class="btn btn-secondary">Cancel</button>
+          <button id="confirmModalConfirm" class="btn btn-primary">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Track Run Modal -->
+    <div id="trackRunModal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Start Farming Run</h2>
+          <button class="modal-close" id="closeTrackRunModal">x</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="runDuration">Duration (minutes)</label>
+            <input type="number" id="runDuration" class="form-input" value="60" min="1" max="300">
+          </div>
+          <div class="form-group">
+            <label for="runName">Run Name (optional)</label>
+            <input type="text" id="runName" class="form-input" placeholder="e.g., Juiced T16 Maps">
+          </div>
+          <div class="form-group">
+            <label>Tracked stash tabs</label>
+            <div class="track-run-tab-actions">
+              <button type="button" id="trackRunSelectVisible" class="btn btn-secondary btn-small">Use selected tab</button>
+              <button type="button" id="trackRunSelectAll" class="btn btn-secondary btn-small">Select all</button>
+              <button type="button" id="trackRunClearSelection" class="btn btn-secondary btn-small">Clear</button>
+            </div>
+            <div class="track-run-help">
+              Only changes inside these stash tabs count for the run delta. The more tabs you include, the longer the start/end scans can take.
+            </div>
+            <div id="trackRunTabList" class="track-run-tab-list"></div>
+          </div>
+          <label class="track-run-option" for="trackRunAutoSmartPrice">
+            <input type="checkbox" id="trackRunAutoSmartPrice">
+            <span>Automatically smart-price items added during the run when it ends</span>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button id="cancelTrackRun" class="btn btn-secondary">Cancel</button>
+          <button id="startTrackRun" class="btn btn-primary">Start Run</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="trackRunWaitingModal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Preparing Run</h2>
+        </div>
+        <div class="modal-body">
+          <div id="trackRunWaitingStatus" class="track-run-waiting-status">Syncing selected stash tabs...</div>
+          <div id="trackRunWaitingTabs" class="track-run-waiting-tabs"></div>
+          <div class="track-run-help">
+            The run starts automatically once these tabs are fully scanned.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="cancelTrackRunWaiting" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <script src="networth-overlay.js"></script>
   </body>
 </html>
+
+

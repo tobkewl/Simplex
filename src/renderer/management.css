@@ -203,35 +203,60 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
 }
 
-/* Run timer indicator above the net worth indicator */
-.run-timer-indicator {
-  position: fixed;
-  width: 48px;
-  height: 60px;
+.networth-run-timer {
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  width: 100%;
+  height: 12px;
+  padding: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #242424;
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 4px 2px;
-  z-index: 10000;
-  -webkit-app-region: no-drag;
-  cursor: pointer;
-  transition: all 0.2s;
-  gap: 2px;
+  z-index: 3;
+  pointer-events: none;
 }
 
-.run-timer-indicator.hidden {
+.networth-run-timer.hidden {
   display: none;
 }
 
-.run-timer-indicator:hover {
-  background: #2a2a2a;
-  border-color: var(--accent-yellow);
-  transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+.networth-indicator.run-active {
+  overflow: visible;
+}
+
+.networth-run-timer-text {
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  color: #e5e7eb;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+
+.networth-run-timer-text.warning {
+  color: #facc15;
+}
+
+.networth-run-timer-text.critical {
+  color: #ef4444;
+}
+
+.networth-indicator.run-critical {
+  animation: networth-run-flash 1s steps(2, end) infinite;
+}
+
+@keyframes networth-run-flash {
+  0%,
+  100% {
+    border-color: rgba(239, 68, 68, 0.45);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.12);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 0.95);
+    box-shadow: 0 0 14px 2px rgba(239, 68, 68, 0.55);
+  }
 }
 
 .build-quick-preview {
@@ -726,22 +751,22 @@ body {
 
 .timer-display {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   gap: 2px;
 }
 
 .timer-icon {
-  font-size: 12px;
+  font-size: 9px;
   color: var(--accent-yellow);
 }
 
 .timer-text {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--accent-yellow);
   font-family: 'Courier New', monospace;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   text-align: center;
 }
 
@@ -764,11 +789,12 @@ body {
 }
 
 .timer-profit-small {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   color: #4ade80;
   text-align: center;
   width: 100%;
+  line-height: 1;
 }
 
 .timer-profit-small.negative {

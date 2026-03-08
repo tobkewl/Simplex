@@ -693,14 +693,13 @@
               </label>
             </div>
 
-            <div class="form-group disabled-content" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
               <div>
                 <div class="form-label">Stash</div>
                 <div class="hint">Show stash value and OAuth status.</div>
-                <div class="hint" style="margin-top: 4px;">Under construction.</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="stashEnabled" disabled />
+                <input type="checkbox" id="stashEnabled" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -800,20 +799,8 @@
         <div class="tab-content" id="tab-stash">
             <div class="section">
             <div class="section-title">Stash Display</div>
-            
-            <!-- Warning: Currently not working -->
-            <div class="form-group" style="background: #2a2a2a; border: 1px solid #e57373; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
-              <div style="display: flex; align-items: flex-start; gap: 8px;">
-                <span style="font-size: 18px;">!</span>
-                <div style="flex: 1;">
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-yellow); margin-bottom: 4px;">
-                    Currently Not Working
-                  </div>
-                  <div style="font-size: 11px; color: #999; line-height: 1.4;">
-                    The Stash feature is currently not functional and displays spoofed data. We are working on implementing this feature.
-                  </div>
-                </div>
-              </div>
+            <div class="hint" style="margin-bottom: 12px;">
+              Browse stash and inventory items in the stash overlay. Item pricing and net worth calculations are handled by website services.
             </div>
             
             <!-- OAuth Section - Prerequisite -->
@@ -847,6 +834,29 @@
                 <option value="chaos">Chaos</option>
               </select>
               <div class="hint" style="margin-top: 4px;">Choose how to display your stash value</div>
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Auto Sync on Open</div>
+              <label class="toggle-switch" style="margin-top: 6px;">
+                <input type="checkbox" id="netWorthAutoSyncOnOpen" />
+                <span class="toggle-slider"></span>
+              </label>
+              <div class="hint" style="margin-top: 6px; color: #d9b46a;">
+                Disabled by default. Enabling this can trigger many stash requests and may hit Path of Exile rate limits quickly.
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">Pricing Search Mode</div>
+              <select id="netWorthPricingListingMode" style="background: #2a2a2a; border: 1px solid #333; border-radius: 4px; padding: 8px 10px; color: var(--accent-yellow); font-size: 12px; width: 100%;">
+                <option value="instant_buyout">Instant Buyout (Default)</option>
+                <option value="instant_buyout_and_in_person">Instant Buyout and In Person</option>
+                <option value="in_person_online_in_league">In Person (Online in League)</option>
+                <option value="in_person_online">In Person (Online)</option>
+                <option value="any">Any</option>
+              </select>
+              <div class="hint" style="margin-top: 4px;">Controls the default trade listing filter for stash pricing searches.</div>
             </div>
 
           </div>
@@ -1045,7 +1055,7 @@
                 Simplex
               </div>
               <div style="font-size: 12px; color: #999; margin-bottom: 6px;">
-                Version <span id="appVersion">0.1</span>
+                Version <span id="appVersion">1.0.3</span>
               </div>
               <div style="font-size: 11px; color: #999; line-height: 1.6; margin-bottom: 8px;">
                 Tab less, play more! Simplex is your Path of Exile companion with three modules in one tool:

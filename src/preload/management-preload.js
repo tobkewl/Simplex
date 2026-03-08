@@ -106,8 +106,8 @@ contextBridge.exposeInMainWorld('managementAPI', {
     });
   },
   onRunStarted: (cb) => {
-    ipcRenderer.on('run:started', () => {
-      cb();
+    ipcRenderer.on('run:started', (_e, data) => {
+      cb(data);
     });
   },
   onRunEnded: (cb) => {
@@ -115,5 +115,6 @@ contextBridge.exposeInMainWorld('managementAPI', {
       cb();
     });
   },
-  toggleRunPause: () => ipcRenderer.send('run:togglePause')
+  toggleRunPause: () => ipcRenderer.send('run:togglePause'),
+  requestRunEnd: () => ipcRenderer.send('run:requestEnd')
 });

@@ -12,10 +12,10 @@ function registerRunSyncIpc({
     }
   });
 
-  ipcMain.on('run:started', () => {
+  ipcMain.on('run:started', (_event, data) => {
     const managementWindow = getManagementWindow();
     if (managementWindow && !managementWindow.isDestroyed()) {
-      managementWindow.webContents.send('run:started');
+      managementWindow.webContents.send('run:started', data);
     }
   });
 
@@ -34,6 +34,17 @@ function registerRunSyncIpc({
       logger.debug('run:togglePause:forward:sent');
     } else {
       logger.warn('run:togglePause:forward:overlay-unavailable');
+    }
+  });
+
+  ipcMain.on('run:requestEnd', () => {
+    logger.debug('run:requestEnd:forward:start');
+    const networthOverlayWindow = getNetworthOverlayWindow();
+    if (networthOverlayWindow && !networthOverlayWindow.isDestroyed()) {
+      networthOverlayWindow.webContents.send('run:requestEnd');
+      logger.debug('run:requestEnd:forward:sent');
+    } else {
+      logger.warn('run:requestEnd:forward:overlay-unavailable');
     }
   });
 }

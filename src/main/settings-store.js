@@ -1,4 +1,5 @@
 function createSettingsStore({ app, path, fs, logger }) {
+  let lastSavedSerialized = null;
   const defaultSettings = {
     liveUrl: '',
     visibleSeconds: 6,
@@ -34,7 +35,11 @@ function createSettingsStore({ app, path, fs, logger }) {
     openSettingsControllerCombo: null,
     openSettingsControllerEnabled: false,
     controllerType: 'auto',
+    netWorthCurrencyDisplay: 'divines',
     netWorthVisibility: 'disabled',
+    netWorthAutoSyncOnOpen: false,
+    netWorthPricingListingMode: 'instant_buyout',
+    netWorthLastLeague: null,
     tutorialCompleted: false,
     liveTrackingDefaultVisibility: 'private',
     liveTrackingPending: null,
@@ -60,6 +65,7 @@ function createSettingsStore({ app, path, fs, logger }) {
       const p = settingsPath();
       if (fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
+        lastSavedSerialized = raw;
         const parsed = JSON.parse(raw);
         const merged = { ...defaultSettings, ...parsed };
         const normalizeShortcutValue = (value) => {
@@ -79,6 +85,15 @@ function createSettingsStore({ app, path, fs, logger }) {
         }
         if (typeof merged.openSettingsControllerEnabled !== 'boolean') {
           merged.openSettingsControllerEnabled = false;
+        }
+        if (
+          merged.netWorthPricingListingMode !== 'instant_buyout_and_in_person'
+          && merged.netWorthPricingListingMode !== 'instant_buyout'
+          && merged.netWorthPricingListingMode !== 'in_person_online_in_league'
+          && merged.netWorthPricingListingMode !== 'in_person_online'
+          && merged.netWorthPricingListingMode !== 'any'
+        ) {
+          merged.netWorthPricingListingMode = 'instant_buyout';
         }
 
         if (Array.isArray(merged.liveUrls) && merged.liveUrls.length > 0 && (!merged.feeds || merged.feeds.length === 0)) {
@@ -148,7 +163,12 @@ function createSettingsStore({ app, path, fs, logger }) {
       }
       fs.mkdirSync(app.getPath('userData'), { recursive: true });
       const settingsFile = settingsPath();
-      fs.writeFileSync(settingsFile, JSON.stringify(cleanedSettings, null, 2));
+      const serialized = JSON.stringify(cleanedSettings, null, 2);
+      if (typeof lastSavedSerialized === 'string' && serialized === lastSavedSerialized) {
+        return;
+      }
+      fs.writeFileSync(settingsFile, serialized);
+      lastSavedSerialized = serialized;
       logger.info('settings:saved', {
         clientLogPath: cleanedSettings.clientLogPath,
         path: settingsFile,

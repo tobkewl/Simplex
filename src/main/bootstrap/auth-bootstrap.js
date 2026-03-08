@@ -67,6 +67,24 @@ async function initializeAuthAndApiClient({
     });
     logger.info('api:client-initialized');
 
+    Promise.resolve()
+      .then(() => apiClient.getNetworthCurrencyExchangeRates?.({ realm: 'pc' }))
+      .then((payload) => {
+        if (!payload || typeof payload !== 'object') return;
+        const snapshots = Array.isArray(payload.snapshots) ? payload.snapshots : [];
+        logger.info('networth:currency-exchange:prefetch', {
+          available: payload.available === true,
+          realm: typeof payload.realm === 'string' ? payload.realm : 'pc',
+          snapshots: snapshots.length,
+          syncedAt: Number.isFinite(Number(payload.syncedAt)) ? Number(payload.syncedAt) : null,
+        });
+      })
+      .catch((error) => {
+        logger.warn('networth:currency-exchange:prefetch-failed', {
+          error: String(error?.message || error),
+        });
+      });
+
     return { authService, apiClient };
   } catch (err) {
     logger.error('auth:initialization-failed', { error: String(err), stack: err?.stack });
