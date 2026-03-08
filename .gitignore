@@ -4,6 +4,7 @@ dist-portable/
 build/
 out/
 release/
+.tmp-release-*/
 scripts/out/
 analysis-local/
 analysis-suite/out/

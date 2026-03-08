@@ -32,6 +32,7 @@ const BLOODLINE_CLASS_KEYS = new Set([
   'ClassesAul',
   'ClassesFarrul',
   'ClassesCatarina',
+  'ClassesNecromantic',
   'ClassesOshabi',
   'ClassesKingInTheMists',
   'ClassesOlroth',
@@ -196,6 +197,37 @@ function buildSpriteCoordsByFilename(coords) {
   return result
 }
 
+function normalizeTreeAssetFile(filename) {
+  const raw = String(filename || '').trim()
+  if (!raw) return null
+  return raw.split('/').pop()?.split('?')[0] || null
+}
+
+function buildBloodlineCoordsFromTreeData(raw) {
+  const sprites = raw?.sprites
+  if (!sprites || typeof sprites !== 'object') return {}
+  const result = {}
+
+  Object.entries(sprites).forEach(([groupKey, variant]) => {
+    if (!String(groupKey || '').toLowerCase().includes('bloodline')) return
+    if (!variant || typeof variant !== 'object') return
+    const sheetKeys = Object.keys(variant)
+    if (!sheetKeys.length) return
+    const bestKey = sheetKeys
+      .map((key) => ({ key, value: Number(key) }))
+      .sort((a, b) => (b.value || 0) - (a.value || 0))[0]?.key || sheetKeys[0]
+    const sheetData = variant[bestKey]
+    if (!sheetData || typeof sheetData !== 'object' || !sheetData.coords) return
+    const sheetName = normalizeTreeAssetFile(sheetData.filename) || 'bloodline-4.webp'
+    Object.entries(sheetData.coords).forEach(([iconPath, coords]) => {
+      if (!String(iconPath || '').startsWith('Classes')) return
+      result[iconPath] = { ...coords, sheet: sheetName }
+    })
+  })
+
+  return result
+}
+
 function getSheetVariant(fileName) {
   const normalized = String(fileName || '').split('/').pop().split('?')[0]
   const match = normalized.match(/-(\d+)\.[^.]+$/)
@@ -246,6 +278,7 @@ function normalizeBloodlineName(value) {
     nameless: 'kinginthemists',
     kinginthemists: 'kinginthemists',
     chaos: 'trialmaster',
+    saresh: 'necromantic',
   }
   const resolved = alias[compact] || compact
   for (const key of BLOODLINE_CLASS_KEYS) {
@@ -453,7 +486,8 @@ class TreePreviewRenderer {
         loadJson(this.spriteCoordsPath),
       ])
       this.treeData = normalizeTreeData(treeDataRaw || {})
-      this.spriteCoords = spriteCoords || null
+      const bloodlineCoords = buildBloodlineCoordsFromTreeData(treeDataRaw || {})
+      this.spriteCoords = { ...(spriteCoords || {}), ...bloodlineCoords }
       this.spriteCoordsByFilename = buildSpriteCoordsByFilename(this.spriteCoords)
       this.sheetVariants = buildSheetVariantIndex(this.spriteCoords)
       await this.preloadImages()

@@ -1797,7 +1797,7 @@ async function loadAppInfo() {
   try {
     const appInfo = await window.settingsAPI.getAppInfo();
     if (appInfo) {
-      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.3';
+      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.4';
     }
     
     // Load log path

@@ -1133,6 +1133,7 @@ const BLOODLINE_ASC_NAMES = new Set([
   'farrul',
   'kinginthemists',
   'lycia',
+  'necromantic',
   'olroth',
   'oshabi',
   'trialmaster',
@@ -1153,6 +1154,7 @@ function isBloodlineAscendancyName(ascendancyName, bloodline) {
   const alias = {
     nameless: 'kinginthemists',
     chaos: 'trialmaster',
+    saresh: 'necromantic',
   }
   const alt = alias[picked] || null
   return asc === picked || asc.includes(picked) || (alt ? asc === alt || asc.includes(alt) : false)
