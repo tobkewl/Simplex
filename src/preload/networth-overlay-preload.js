@@ -378,6 +378,7 @@ function toLegacyTaskQueue(data) {
   return {
     pricing: asArray(source.pricing),
     scans: asArray(source.scans || source.scan),
+    pricingPaused: source.pricingPaused === true,
     rateLimits: asObject(source.rateLimits) || null,
     cachedStashTabs: asObject(source.cachedStashTabs) || null,
     scanHistoryClearedAt: Number(source.scanHistoryClearedAt || 0),
@@ -513,6 +514,8 @@ contextBridge.exposeInMainWorld('networthOverlayAPI', {
     const queue = await ipcRenderer.invoke('networth:getTaskQueue');
     return toLegacyTaskQueue(queue);
   },
+  pausePricingQueue: () => ipcRenderer.invoke('networth:pausePricingQueue'),
+  resumePricingQueue: () => ipcRenderer.invoke('networth:resumePricingQueue'),
   removePricingQueueItem: (itemKey) => ipcRenderer.invoke('networth:removePricingQueueItem', itemKey),
   clearPricingQueue: () => ipcRenderer.invoke('networth:clearPricingQueue'),
   enqueuePricingItems: (items, _league) => ipcRenderer.invoke('networth:enqueuePricingItems', items, NETWORTH_ACTIVE_LEAGUE),

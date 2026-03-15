@@ -1119,10 +1119,33 @@ function normalizeManualTreeBySection(raw) {
         return { id: typeof action.id === 'string' ? action.id : `action-${blockId}-${index}`, type, nodeId }
       })
       .filter(Boolean)
-    result[blockId] = { order, actions }
+    const masterySelections =
+      value.masterySelections && typeof value.masterySelections === 'object'
+        ? Object.fromEntries(
+            Object.entries(value.masterySelections)
+              .map(([nodeId, effectId]) => {
+                const parsed = Number(effectId)
+                return nodeId && Number.isFinite(parsed) ? [String(nodeId), parsed] : null
+              })
+              .filter(Boolean)
+          )
+        : {}
+    result[blockId] = { order, actions, masterySelections }
   })
 
   return result
+}
+
+function normalizeMasterySelections(raw) {
+  if (!raw || typeof raw !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(raw)
+      .map(([nodeId, effectId]) => {
+        const parsed = Number(effectId)
+        return nodeId && Number.isFinite(parsed) ? [String(nodeId), parsed] : null
+      })
+      .filter(Boolean)
+  )
 }
 
 const BLOODLINE_ASC_NAMES = new Set([
@@ -1666,6 +1689,7 @@ function buildGuideTreeBySection(blocks, tree, meta, treeNodeMetaById, general) 
   const treeMeta = meta && typeof meta.tree === 'object' ? meta.tree : {}
   const sectionMode = treeMeta.sectionMode === 'manual' ? 'manual' : 'automatic'
   const manualBySectionId = normalizeManualTreeBySection(treeMeta.manualTreeBySectionId)
+  const globalMasterySelections = normalizeMasterySelections(treeMeta.masterySelections)
   const banditChoice = toString(treeMeta.banditChoice) || 'kill_all'
   const bloodline = toString(general?.bloodline)
 
@@ -1773,6 +1797,13 @@ function buildGuideTreeBySection(blocks, tree, meta, treeNodeMetaById, general) 
       hasBloodline: bloodState.allocationOrder.length > 0,
       ascendancyName: resolveAscendancyNameFromOrder(ascState.allocationOrder, treeNodeMetaById, bloodline) || fallbackAscendancyName,
       bloodlineName: resolveBloodlineNameFromOrder(bloodState.allocationOrder, treeNodeMetaById, bloodline),
+      actions: Array.isArray(manualBySectionId[sectionId]?.actions)
+        ? manualBySectionId[sectionId].actions
+        : [],
+      masterySelections:
+        sectionMode === 'manual'
+          ? (manualBySectionId[sectionId]?.masterySelections || {})
+          : globalMasterySelections,
     }
   })
 
@@ -2256,10 +2287,13 @@ function renderActiveGuideTree() {
   const highlightNodeId = typeof getHighlightNodeId === 'function' ? getHighlightNodeId() : nodeKeys[stepIndex] || null
   const viewMode = typeof getViewMode === 'function' ? getViewMode() : 'tree'
   const sectionHighlight = typeof getSectionHighlight === 'function' ? getSectionHighlight() : null
-  renderer.render(nodeKeys, { highlightNodeId, className, ascendancyName, bloodlineName, showAllNodes: true, centerOnHighlight: true, viewMode, sectionHighlight })
+  const masterySelections = typeof activeGuideTree.getMasterySelections === 'function'
+    ? activeGuideTree.getMasterySelections()
+    : {}
+  renderer.render(nodeKeys, { highlightNodeId, className, ascendancyName, bloodlineName, showAllNodes: true, centerOnHighlight: true, viewMode, sectionHighlight, masterySelections })
 }
 
-function setupGuideTreePreview(sectionId, nodeKeysByMode, stepNodesByMode, highlightByMode, nodeLabels, className, ascendancyName, bloodlineName, leagueValue, defaultViewMode, elements) {
+function setupGuideTreePreview(sectionId, nodeKeysByMode, stepNodesByMode, highlightByMode, masterySelections, nodeLabels, className, ascendancyName, bloodlineName, leagueValue, defaultViewMode, elements) {
   const {
     ribbonDots,
     ribbonBar,
@@ -2378,6 +2412,7 @@ function setupGuideTreePreview(sectionId, nodeKeysByMode, stepNodesByMode, highl
       getHighlightNodeId: () => effectiveSteps[stepIndex] || null,
       getViewMode: () => resolveViewMode(),
       getSectionHighlight: () => highlight,
+      getMasterySelections: () => masterySelections || {},
     }
     updateZoomLabel()
     updateViewToggle()
@@ -2467,7 +2502,7 @@ function setupGuideTreePreview(sectionId, nodeKeysByMode, stepNodesByMode, highl
   requestAnimationFrame(renderCanvas)
 }
 
-function renderGuideTreeCard(sectionId, nodeKeysByMode, stepNodesByMode, highlightByMode, nodeLabels, className, ascendancyName, bloodlineName, leagueValue, defaultViewMode, hasAsc, hasBloodline) {
+function renderGuideTreeCard(sectionId, nodeKeysByMode, stepNodesByMode, highlightByMode, masterySelections, nodeLabels, className, ascendancyName, bloodlineName, leagueValue, defaultViewMode, hasAsc, hasBloodline) {
   const card = createEl('div', 'rounded-lg border border-border/60 bg-card/40 p-4 shadow-[0_0_25px_rgba(0,0,0,0.45)] space-y-3')
 
   const header = createEl('div', 'flex items-center justify-between gap-3 flex-wrap')
@@ -2553,7 +2588,7 @@ function renderGuideTreeCard(sectionId, nodeKeysByMode, stepNodesByMode, highlig
   canvasWrap.appendChild(canvas)
   card.appendChild(canvasWrap)
 
-  setupGuideTreePreview(sectionId, nodeKeysByMode, stepNodesByMode, highlightByMode, nodeLabels, className, ascendancyName, bloodlineName, leagueValue, defaultViewMode, {
+  setupGuideTreePreview(sectionId, nodeKeysByMode, stepNodesByMode, highlightByMode, masterySelections, nodeLabels, className, ascendancyName, bloodlineName, leagueValue, defaultViewMode, {
     ribbonDots: dots,
     ribbonBar: bar,
     prevBtn,
@@ -2640,6 +2675,7 @@ function renderLiveGuideView(blocks, gearByBlock, treeBySection, general, select
   const className = toString(general?.class) || null
   const ascendancyName = toString(general?.ascendancy || general?.ascendancyName) || treeState.ascendancyName || null
   const bloodlineName = toString(general?.bloodline) || treeState.bloodlineName || null
+  const masterySelections = treeState.masterySelections || {}
 
   guideLiveView.appendChild(
     renderGuideTreeCard(
@@ -2647,6 +2683,7 @@ function renderLiveGuideView(blocks, gearByBlock, treeBySection, general, select
       nodeKeysByMode,
       stepNodesByMode,
       highlightByMode,
+      masterySelections,
       cachedGuideTreeLabels || {},
       className,
       ascendancyName,
@@ -2736,12 +2773,14 @@ function renderGuideSections(blocks, gearByBlock, notesByScope, guideExtraBlocks
     const className = toString(general?.class) || null
     const ascendancyName = toString(general?.ascendancy || general?.ascendancyName) || treeState.ascendancyName || null
     const bloodlineName = toString(general?.bloodline) || treeState.bloodlineName || null
+    const masterySelections = treeState.masterySelections || {}
     section.appendChild(
       renderGuideTreeCard(
         block.id,
         nodeKeysByMode,
         stepNodesByMode,
         highlightByMode,
+        masterySelections,
         nodeLabels,
         className,
         ascendancyName,
@@ -3241,51 +3280,51 @@ async function clearActiveRunBuild() {
   renderBuildsList()
 }
 
+async function refreshSharedGuideStateForBuild(buildId, fallbackBuild = null) {
+  if (!buildId) return null
+
+  const result = await invokeWithTimeout('api:get-build', buildId)
+  if (!result?.success || !result?.data) {
+    throw new Error(result?.error || 'Failed to load build')
+  }
+
+  const buildData = result.data
+  const context = await buildGuideContext(buildData)
+  const { blocks, gearByBlock, guideTree, general, banditChoice } = context
+
+  seedGearItemCache(buildData.gearItems)
+  await loadGearItemMetadata(gearByBlock)
+
+  const resolvedGearByBlock = buildResolvedGearByBlock(gearByBlock)
+  await invokeWithTimeout('build:setActiveGuideState', {
+    buildId: buildData.build.id,
+    buildName: buildData.build.name,
+    buildType: resolveBuildTypeFromData(buildData, fallbackBuild),
+    blocks,
+    gearByBlock: resolvedGearByBlock,
+    guideTreeBySection: guideTree.bySection,
+    guideTreeLabels: guideTree.labelByKey || {},
+    general,
+    banditChoice,
+  })
+
+  activeRunBuildId = buildData.build.id
+  updateActiveRunGuideLabel(buildData.build.name || 'Selected build')
+  return buildData
+}
+
 async function setActiveRunBuild(build) {
   const buildId = build?.id
   if (!buildId) return
 
   try {
-    const data =
-      currentBuildData && currentBuildData.build && currentBuildData.build.id === buildId
-        ? currentBuildData
-        : null
-
-    let buildData = data
-    if (!buildData) {
-      const result = await invokeWithTimeout('api:get-build', buildId)
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to load build')
-      }
-      buildData = result.data
-    }
-
-    const context = await buildGuideContext(buildData)
-    const { blocks, gearByBlock, guideTree, general, banditChoice } = context
-
-    seedGearItemCache(buildData.gearItems)
-    await loadGearItemMetadata(gearByBlock)
-
-    const resolvedGearByBlock = buildResolvedGearByBlock(gearByBlock)
-    await invokeWithTimeout('build:setActiveGuideState', {
-      buildId: buildData.build.id,
-      buildName: buildData.build.name,
-      buildType: resolveBuildTypeFromData(buildData, build),
-      blocks,
-      gearByBlock: resolvedGearByBlock,
-      guideTreeBySection: guideTree.bySection,
-      guideTreeLabels: guideTree.labelByKey || {},
-      general,
-      banditChoice,
-    })
+    const buildData = await refreshSharedGuideStateForBuild(buildId, build)
 
     await invokeWithTimeout('build:saveBuild', {
       id: buildData.build.id,
       name: buildData.build.name,
     })
 
-    activeRunBuildId = buildData.build.id
-    updateActiveRunGuideLabel(buildData.build.name || 'Selected build')
     renderBuildsList()
   } catch (error) {
     console.error('Failed to set run build:', error)
@@ -3401,8 +3440,13 @@ async function initialize() {
   try {
     const savedRun = await invokeWithTimeout('build:getActiveBuild')
     if (savedRun && savedRun.id) {
-      activeRunBuildId = savedRun.id
-      updateActiveRunGuideLabel(savedRun.name || 'Selected build')
+      try {
+        await refreshSharedGuideStateForBuild(savedRun.id, savedRun)
+      } catch (error) {
+        console.warn('[Build Overlay] Failed to refresh saved active run build:', error)
+        activeRunBuildId = savedRun.id
+        updateActiveRunGuideLabel(savedRun.name || 'Selected build')
+      }
     } else {
       updateActiveRunGuideLabel('None selected')
     }

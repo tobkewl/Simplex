@@ -358,7 +358,10 @@ class TreePreviewRenderer {
     this.lastCenteredNodeId = null
     this.highlightNodeId = null
     this.highlightNodeIds = null
+    this.visibleNodeIds = null
+    this.inactiveNodeIds = null
     this.sectionHighlight = null
+    this.masterySelections = {}
     this.highlightStyle = {
       ringScale: typeof options.highlightRingScale === 'number' ? options.highlightRingScale : 0.6,
       ringWidth: typeof options.highlightRingWidth === 'number' ? options.highlightRingWidth : 3,
@@ -605,6 +608,15 @@ class TreePreviewRenderer {
     this.hoveredNodeId = null
   }
 
+  getSelectedMasteryEffect(nodeId) {
+    if (!nodeId || !this.treeData?.nodes) return null
+    const effectId = this.masterySelections?.[String(nodeId)]
+    if (!Number.isFinite(effectId)) return null
+    const node = this.treeData.nodes[String(nodeId)]
+    const effects = Array.isArray(node?.masteryEffects) ? node.masteryEffects : []
+    return effects.find((entry) => Number(entry?.effect) === Number(effectId)) || null
+  }
+
   updateTooltip(node, nodeId, x, y) {
     if (!node) return
     const resolvedId = nodeId != null ? String(nodeId) : String(node.id || '')
@@ -617,6 +629,24 @@ class TreePreviewRenderer {
       title.className = 'tree-tooltip-title'
       title.textContent = node.name || 'Passive'
       this.tooltipEl.appendChild(title)
+
+      const selectedMastery = node?.isMastery ? this.getSelectedMasteryEffect(resolvedId) : null
+      const selectedStats = Array.isArray(selectedMastery?.stats)
+        ? selectedMastery.stats.filter((stat) => typeof stat === 'string' && stat.trim())
+        : []
+      if (selectedStats.length > 0) {
+        const selectedTitle = document.createElement('div')
+        selectedTitle.className = 'tree-tooltip-title'
+        selectedTitle.textContent = 'Selected Mastery'
+        this.tooltipEl.appendChild(selectedTitle)
+
+        selectedStats.forEach((stat) => {
+          const line = document.createElement('div')
+          line.className = 'tree-tooltip-stat'
+          line.textContent = stat
+          this.tooltipEl.appendChild(line)
+        })
+      }
 
       const stats = Array.isArray(node.stats) ? node.stats : []
       stats.forEach((stat) => {
@@ -1083,6 +1113,24 @@ class TreePreviewRenderer {
         this.highlightNodeIds = null
       }
     }
+    if (options.visibleNodeIds !== undefined) {
+      if (Array.isArray(options.visibleNodeIds)) {
+        this.visibleNodeIds = options.visibleNodeIds
+          .map((id) => (id != null ? String(id) : null))
+          .filter(Boolean)
+      } else {
+        this.visibleNodeIds = null
+      }
+    }
+    if (options.inactiveNodeIds !== undefined) {
+      if (Array.isArray(options.inactiveNodeIds)) {
+        this.inactiveNodeIds = options.inactiveNodeIds
+          .map((id) => (id != null ? String(id) : null))
+          .filter(Boolean)
+      } else {
+        this.inactiveNodeIds = null
+      }
+    }
     if (options.className !== undefined) {
       this.selectedClassName = options.className
     }
@@ -1107,6 +1155,17 @@ class TreePreviewRenderer {
       } else {
         this.sectionHighlight = null
       }
+    }
+    if (options.masterySelections !== undefined) {
+      const next = {}
+      if (options.masterySelections && typeof options.masterySelections === 'object') {
+        Object.entries(options.masterySelections).forEach(([nodeId, effectId]) => {
+          const parsed = Number(effectId)
+          if (!nodeId || !Number.isFinite(parsed)) return
+          next[String(nodeId)] = parsed
+        })
+      }
+      this.masterySelections = next
     }
     if (options.transparentBackground !== undefined) {
       this.transparentBackground = options.transparentBackground === true
@@ -1210,9 +1269,31 @@ class TreePreviewRenderer {
     const highlightIds = Array.isArray(this.highlightNodeIds)
       ? this.highlightNodeIds.map((key) => String(key))
       : (this.highlightNodeId != null ? [String(this.highlightNodeId)] : [])
+    const explicitVisibleIds = Array.isArray(this.visibleNodeIds)
+      ? this.visibleNodeIds.filter((id) => isNodeInView(this.treeData.nodes[id]))
+      : []
+    const inactiveIdSet = Array.isArray(this.inactiveNodeIds)
+      ? new Set(this.inactiveNodeIds.map((id) => String(id)))
+      : new Set()
+    const sectionPrevSet = new Set(this.sectionHighlight?.previous || [])
+    const sectionCurSet = new Set(this.sectionHighlight?.current || [])
+    const sectionRemovedSet = new Set(this.sectionHighlight?.removed || [])
     const highlightSetForBounds = new Set(highlightIds.filter((id) => isNodeInView(this.treeData.nodes[id])))
-    const baseSet = new Set(viewAllocatedIds)
+    sectionCurSet.forEach((id) => {
+      if (isNodeInView(this.treeData.nodes[id])) highlightSetForBounds.add(id)
+    })
+    sectionRemovedSet.forEach((id) => {
+      if (isNodeInView(this.treeData.nodes[id])) highlightSetForBounds.add(id)
+    })
+    const baseSet = new Set(viewAllocatedIds.filter((id) => !inactiveIdSet.has(String(id))))
     highlightSetForBounds.forEach((id) => baseSet.add(id))
+    explicitVisibleIds.forEach((id) => baseSet.add(id))
+    sectionCurSet.forEach((id) => {
+      if (isNodeInView(this.treeData.nodes[id])) baseSet.add(id)
+    })
+    sectionRemovedSet.forEach((id) => {
+      if (isNodeInView(this.treeData.nodes[id])) baseSet.add(id)
+    })
     const baseIds = baseSet.size > 0 ? Array.from(baseSet) : viewIds
     if (baseIds.length === 0) return
 
@@ -1277,16 +1358,23 @@ class TreePreviewRenderer {
     if (isReliquarianAscendancyView) {
       maxZoomCap = Math.min(this.maxZoom, maxZoomCap * RELIQUARIAN_VIEW_ZOOM_BOOST)
     }
-    const zoomTarget = baseZoom
-      * this.zoomFactor
-      * (isReliquarianAscendancyView ? RELIQUARIAN_VIEW_ZOOM_BOOST : 1)
-    const zoom = Math.max(this.minZoom, Math.min(maxZoomCap, zoomTarget))
+    const fitZoom = Math.max(
+      this.minZoom,
+      Math.min(
+        maxZoomCap,
+        baseZoom * (isReliquarianAscendancyView ? RELIQUARIAN_VIEW_ZOOM_BOOST : 1)
+      )
+    )
+    const zoom = Math.max(this.minZoom, Math.min(maxZoomCap, fitZoom * this.zoomFactor))
     this.lastZoom = zoom
-    const highlightId = this.highlightNodeId != null
-      ? String(this.highlightNodeId)
-      : (Array.isArray(this.highlightNodeIds) && this.highlightNodeIds.length > 0
-        ? String(this.highlightNodeIds[0])
-        : null)
+    const highlightCandidates = [
+      this.highlightNodeId != null ? String(this.highlightNodeId) : null,
+      ...(Array.isArray(this.highlightNodeIds) ? this.highlightNodeIds.map((key) => String(key)) : []),
+    ].filter(Boolean)
+    const highlightId = highlightCandidates.find((id) => {
+      const node = this.treeData?.nodes?.[id]
+      return node && isNodeInView(node)
+    }) || null
     if (centerOnHighlight && highlightId && this.treeData?.nodes?.[highlightId]) {
       const node = this.treeData.nodes[highlightId]
       if (typeof node.x === 'number' && typeof node.y === 'number') {
@@ -1304,19 +1392,18 @@ class TreePreviewRenderer {
     const offsetY = (height / 2) + panY
 
     const showAll = this.showAllNodes === true
-    const renderIds = showAll ? viewIds : viewAllocatedIds
-    const allocatedSet = new Set(viewAllocatedIds)
+    const renderIds = explicitVisibleIds.length > 0
+      ? explicitVisibleIds
+      : (showAll ? viewIds : viewAllocatedIds)
+    const allocatedSet = new Set(viewAllocatedIds.filter((id) => !inactiveIdSet.has(String(id))))
     const highlightSet = Array.isArray(this.highlightNodeIds)
       ? new Set(this.highlightNodeIds.map((key) => String(key)))
       : null
-    const sectionPrevSet = new Set(this.sectionHighlight?.previous || [])
-    const sectionCurSet = new Set(this.sectionHighlight?.current || [])
-    const sectionRemovedSet = new Set(this.sectionHighlight?.removed || [])
     const sectionNewSet = new Set(
       Array.from(sectionCurSet).filter((id) => !sectionPrevSet.has(id))
     )
     const resolveSectionColor = (id) => {
-      if (sectionRemovedSet.has(id)) return 'rgba(239, 68, 68, 0.95)'
+      if (sectionRemovedSet.has(id)) return 'rgba(239, 68, 68, 0.72)'
       if (sectionNewSet.has(id)) return 'rgba(59, 130, 246, 0.95)'
       if (sectionCurSet.has(id) || sectionPrevSet.has(id)) return 'rgba(0, 255, 160, 0.95)'
       return null
@@ -1414,10 +1501,10 @@ class TreePreviewRenderer {
       if (sectionColor) {
         ctx.save()
         ctx.shadowColor = sectionColor
-        ctx.shadowBlur = 18
+        ctx.shadowBlur = sectionRemovedSet.has(String(id)) ? 12 : 18
         ctx.strokeStyle = sectionColor
-        ctx.lineWidth = 2.5
-        ctx.globalAlpha = 0.35
+        ctx.lineWidth = sectionRemovedSet.has(String(id)) ? 2 : 2.5
+        ctx.globalAlpha = sectionRemovedSet.has(String(id)) ? 0.22 : 0.35
         ctx.beginPath()
         ctx.arc(x, y, size * 0.55, 0, Math.PI * 2)
         ctx.fillStyle = sectionColor

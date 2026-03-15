@@ -17,6 +17,7 @@ const buildQuickPreview = document.getElementById('buildQuickPreview');
 const quickPreviewSection = document.getElementById('quickPreviewSection');
 const quickPreviewQuestHint = document.getElementById('quickPreviewQuestHint');
 const quickPreviewNodeLabel = document.getElementById('quickPreviewNodeLabel');
+const quickPreviewActionHint = document.getElementById('quickPreviewActionHint');
 const quickPreviewTreeCanvas = document.getElementById('quickPreviewTreeCanvas');
 const quickPreviewSkills = document.getElementById('quickPreviewSkills');
 const quickPreviewGear = document.getElementById('quickPreviewGear');
@@ -34,6 +35,7 @@ const levelUpPopup = document.getElementById('levelUpPopup');
 const levelUpCanvas = document.getElementById('levelUpCanvas');
 const levelUpLevel = document.getElementById('levelUpLevel');
 const levelUpNodeLabel = document.getElementById('levelUpNodeLabel');
+const levelUpActionHint = document.getElementById('levelUpActionHint');
 const levelUpQuestHint = document.getElementById('levelUpQuestHint');
 const dragOverlay = document.getElementById('dragOverlay');
 const publicConfig = window.managementAPI?.getPublicConfig?.() || {};
@@ -61,7 +63,7 @@ let levelPopupRenderer = null;
 let quickPreviewTreeRenderer = null;
 
 const resolveTreeNodeLabel = (nodeId, state, renderer) => {
-  if (!nodeId) return 'No next node';
+  if (!nodeId) return 'Section complete';
   const fromState = toString(state?.guideTreeLabels?.[nodeId]);
   if (fromState && fromState !== String(nodeId)) return fromState;
   const fromTree = renderer?.treeData?.nodes?.[nodeId]?.name;
@@ -70,16 +72,299 @@ const resolveTreeNodeLabel = (nodeId, state, renderer) => {
 };
 
 const formatAllocateLabel = (nodeIds, state, renderer) => {
-  if (!Array.isArray(nodeIds) || nodeIds.length === 0) return 'No next node';
+  if (!Array.isArray(nodeIds) || nodeIds.length === 0) return 'Section complete';
   const names = nodeIds
     .filter((id) => id != null)
     .map((id) => resolveTreeNodeLabel(id, state, renderer))
     .filter(Boolean);
-  if (names.length === 0) return 'No next node';
+  if (names.length === 0) return 'Section complete';
   if (names.length === 1) return `Allocate '${names[0]}'`;
   if (names.length === 2) return `Allocate '${names[0]}' & '${names[1]}'`;
   return `Allocate ${names.map((n) => `'${n}'`).join(', ')}`;
 };
+
+const partitionPreviewNodeIds = (nodeIds, renderer) => {
+  const tree = [];
+  const ascendancy = [];
+  uniqueNodeIds(nodeIds).forEach((id) => {
+    const node = renderer?.treeData?.nodes?.[id];
+    if (node && typeof node.ascendancyName === 'string' && node.ascendancyName.trim()) {
+      ascendancy.push(String(id));
+      return;
+    }
+    tree.push(String(id));
+  });
+  return { tree, ascendancy };
+};
+
+const buildPreviewAllocateLabel = (nodeIds, state, renderer) => {
+  const { tree, ascendancy } = partitionPreviewNodeIds(nodeIds, renderer);
+  if (tree.length > 0) return formatAllocateLabel(tree, state, renderer);
+  if (tree.length === 0 && ascendancy.length > 0) {
+    return 'Ascendancy step available';
+  }
+  return formatAllocateLabel(nodeIds, state, renderer);
+};
+
+const buildAscendancyActionHint = (nodeIds, state, renderer) => {
+  const { ascendancy } = partitionPreviewNodeIds(nodeIds, renderer);
+  if (ascendancy.length === 0) return '';
+  const summary = formatNodeSummary(ascendancy, state, renderer, { maxNames: 2 });
+  return summary ? `Also allocate on ascendancy: ${summary}.` : 'Also allocate on ascendancy.';
+};
+
+const resolveSelectedMasteryEffect = (nodeId, sectionTree, renderer) => {
+  if (!nodeId || !sectionTree || !renderer?.treeData?.nodes) return null;
+  const effectId = Number(sectionTree?.masterySelections?.[String(nodeId)]);
+  if (!Number.isFinite(effectId)) return null;
+  const node = renderer.treeData.nodes[String(nodeId)];
+  const effects = Array.isArray(node?.masteryEffects) ? node.masteryEffects : [];
+  return effects.find((entry) => Number(entry?.effect) === effectId) || null;
+};
+
+const formatMasteryEffectSummary = (nodeId, sectionTree, renderer) => {
+  const effect = resolveSelectedMasteryEffect(nodeId, sectionTree, renderer);
+  const stats = Array.isArray(effect?.stats)
+    ? effect.stats.filter((stat) => typeof stat === 'string' && stat.trim())
+    : [];
+  if (stats.length === 0) return '';
+  return stats.join(' | ');
+};
+
+const buildMasteryActionHint = (nodeIds, sectionTree, renderer) => {
+  const summaries = uniqueNodeIds(nodeIds)
+    .map((nodeId) => formatMasteryEffectSummary(nodeId, sectionTree, renderer))
+    .filter(Boolean);
+  if (summaries.length === 0) return '';
+  if (summaries.length === 1) return `Choose mastery option: ${summaries[0]}.`;
+  return `Choose mastery options: ${summaries.slice(0, 2).join(' / ')}${summaries.length > 2 ? ` +${summaries.length - 2} more` : ''}.`;
+};
+
+const formatNodeSummary = (nodeIds, state, renderer, options = {}) => {
+  const maxNames = Number.isFinite(options.maxNames) ? Math.max(1, options.maxNames) : 2;
+  const names = uniqueNodeIds(nodeIds)
+    .map((id) => resolveTreeNodeLabel(id, state, renderer))
+    .filter(Boolean);
+  if (names.length === 0) return '';
+  const visible = names.slice(0, maxNames).map((name) => `'${name}'`);
+  if (visible.length === 1) {
+    return names.length > maxNames ? `${visible[0]} +${names.length - maxNames} more` : visible[0];
+  }
+  const joined = visible.length === 2
+    ? `${visible[0]} & ${visible[1]}`
+    : `${visible.slice(0, -1).join(', ')} & ${visible[visible.length - 1]}`;
+  return names.length > maxNames ? `${joined} +${names.length - maxNames} more` : joined;
+};
+
+function setPreviewActionHint(el, text, { respec = false } = {}) {
+  if (!el) return;
+  if (!text) {
+    el.textContent = '';
+    el.classList.add('hidden');
+    el.classList.remove('respec');
+    return;
+  }
+  el.textContent = text;
+  el.classList.remove('hidden');
+  el.classList.toggle('respec', respec);
+}
+
+function buildPopupTreeInstruction(progress, sectionTree, state, renderer) {
+  const addNodes = uniqueNodeIds(progress?.highlightNodes);
+  const previousNodes = uniqueNodeIds(progress?.previousNodes || sectionTree?.highlight?.previous);
+  const currentNodes = uniqueNodeIds(progress?.currentNodes || sectionTree?.highlight?.current);
+  const removedNodes = uniqueNodeIds(progress?.removedNodes || sectionTree?.highlight?.removed);
+  const visibleAddNodes = partitionPreviewNodeIds(addNodes, renderer).tree;
+  const visibleRemovedNodes = partitionPreviewNodeIds(removedNodes, renderer).tree;
+  const ascendancyActionHint = buildAscendancyActionHint(addNodes, state, renderer);
+  const progressNodes = uniqueNodeIds(progress?.progressNodes);
+  const allocatedBeforeCurrentCount = Math.max(0, Number(progress?.allocatedBeforeCurrentCount || 0));
+  const allocatedAtCurrentCount = Math.max(0, Number(progress?.allocatedAtCurrentCount || 0));
+  const labelNodeIds = addNodes.length > 0
+    ? addNodes
+    : (progress?.nextNodeId ? [String(progress.nextNodeId)] : []);
+  const masteryActionHint = buildMasteryActionHint(labelNodeIds, sectionTree, renderer);
+
+  if (progress?.actionDriven) {
+    if (removedNodes.length === 0) {
+      const actionHint = [masteryActionHint, ascendancyActionHint].filter(Boolean).join(' ');
+      return {
+        label: buildPreviewAllocateLabel(labelNodeIds, state, renderer),
+        actionHint,
+        renderNodes: uniqueNodeIds(progress?.activeNodeIds),
+        visibleNodeIds: null,
+        inactiveNodeIds: null,
+        highlightNodeId: progress?.nextNodeId || null,
+        highlightNodeIds: visibleAddNodes,
+        sectionHighlight: {
+          previous: [],
+          current: visibleAddNodes,
+          removed: [],
+        },
+        requiresRespec: false,
+      };
+    }
+
+    const addCount = Math.max(1, visibleAddNodes.length || addNodes.length);
+    const removeSummary = formatNodeSummary(visibleRemovedNodes, state, renderer, { maxNames: 2 });
+    const addSummary = formatNodeSummary(visibleAddNodes, state, renderer, { maxNames: 2 });
+    let actionHint = '';
+    if (addSummary && removeSummary) {
+      actionHint = `Allocate ${addSummary}. Red nodes can be removed.`;
+    } else if (addSummary) {
+      actionHint = `Allocate ${addSummary}.`;
+    } else if (removeSummary) {
+      actionHint = 'Red nodes can be removed.';
+    } else {
+      actionHint = `Allocate ${addCount}. Red nodes can be removed.`;
+    }
+    if (removedNodes.length + addNodes.length > 10) {
+      actionHint = visibleAddNodes.length > 0 || addNodes.length > 0
+        ? `Allocate ${addCount}. Red nodes can be removed.`
+        : 'Red nodes can be removed. Open build for full tree.';
+    }
+    if (ascendancyActionHint) {
+      actionHint = actionHint ? `${actionHint} ${ascendancyActionHint}` : ascendancyActionHint;
+    }
+    if (masteryActionHint) {
+      actionHint = actionHint ? `${actionHint} ${masteryActionHint}` : masteryActionHint;
+    }
+
+    return {
+      label: buildPreviewAllocateLabel(labelNodeIds, state, renderer),
+      actionHint,
+      renderNodes: uniqueNodeIds(progress?.activeNodeIds),
+      visibleNodeIds: null,
+      inactiveNodeIds: visibleRemovedNodes,
+      highlightNodeId: visibleAddNodes[0] || progress?.nextNodeId || null,
+      highlightNodeIds: visibleAddNodes,
+      sectionHighlight: {
+        previous: [],
+        current: visibleAddNodes,
+        removed: visibleRemovedNodes,
+      },
+      requiresRespec: true,
+    };
+  }
+
+  const buildActiveNodesAtCount = (count, { dropRemoved = false } = {}) => {
+    const active = uniqueNodeIds(previousNodes.concat(progressNodes.slice(0, Math.max(0, count))));
+    if (!dropRemoved || removedNodes.length === 0) return active;
+    const removedSet = new Set(removedNodes);
+    return active.filter((id) => !removedSet.has(String(id)));
+  };
+  const activeNodeIdsBeforeRespec = buildActiveNodesAtCount(allocatedAtCurrentCount);
+  const firstSafeRemovalCount = removedNodes.length > 0
+    ? (() => {
+        const removedSet = new Set(removedNodes);
+        const progressSet = new Set(progressNodes);
+        const actions = Array.isArray(sectionTree?.actions) ? sectionTree.actions : [];
+        let allocateCount = 0;
+        for (const action of actions) {
+          if (!action || !action.type || !action.nodeId) continue;
+          const nodeId = String(action.nodeId);
+          if (action.type === 'allocate' && progressSet.has(nodeId)) {
+            allocateCount += 1;
+            continue;
+          }
+          if (action.type === 'deallocate' && removedSet.has(nodeId)) {
+            return allocateCount;
+          }
+        }
+        for (let count = 0; count <= progressNodes.length; count += 1) {
+          if (canSafelyRespecNodes(buildActiveNodesAtCount(count), removedNodes, state, renderer)) {
+            return count;
+          }
+        }
+        return null;
+      })()
+    : null;
+  const canDropRemovedNow =
+      firstSafeRemovalCount != null && allocatedAtCurrentCount >= firstSafeRemovalCount;
+  const showRespecHint =
+      firstSafeRemovalCount != null && allocatedAtCurrentCount === firstSafeRemovalCount;
+  const showRespecOverlay = (
+      removedNodes.length > 0 &&
+      firstSafeRemovalCount != null &&
+      allocatedAtCurrentCount >= firstSafeRemovalCount
+    );
+  const activeNodeIdsAfterRespec = buildActiveNodesAtCount(allocatedAtCurrentCount, { dropRemoved: true });
+  const displayNodeIds = showRespecOverlay
+      ? activeNodeIdsAfterRespec
+      : canDropRemovedNow
+        ? activeNodeIdsAfterRespec
+        : activeNodeIdsBeforeRespec;
+
+  if (!showRespecOverlay) {
+    const actionHint = [masteryActionHint, ascendancyActionHint].filter(Boolean).join(' ');
+    return {
+      label: buildPreviewAllocateLabel(labelNodeIds, state, renderer),
+      actionHint,
+      renderNodes: displayNodeIds.length > 0
+        ? displayNodeIds
+        : (progress?.nextNodeId ? [progress.nextNodeId] : []),
+      visibleNodeIds: null,
+      inactiveNodeIds: null,
+      highlightNodeId: progress?.nextNodeId || null,
+      highlightNodeIds: visibleAddNodes,
+      sectionHighlight: {
+        previous: [],
+        current: visibleAddNodes,
+        removed: [],
+      },
+      requiresRespec: false,
+    };
+  }
+
+  const addCount = Math.max(1, visibleAddNodes.length || addNodes.length);
+  const label = labelNodeIds.length > 0
+      ? buildPreviewAllocateLabel(labelNodeIds, state, renderer)
+      : `Remove ${visibleRemovedNodes.length || removedNodes.length} node${(visibleRemovedNodes.length || removedNodes.length) === 1 ? '' : 's'}`;
+  const removeSummary = formatNodeSummary(visibleRemovedNodes, state, renderer, { maxNames: 2 });
+  const addSummary = formatNodeSummary(visibleAddNodes, state, renderer, { maxNames: 2 });
+  let actionHint = '';
+  if (showRespecHint) {
+    if (addSummary && removeSummary) {
+      actionHint = `Allocate ${addSummary}. Red nodes can be removed.`;
+    } else if (addSummary) {
+      actionHint = `Allocate ${addSummary}.`;
+    } else if (removeSummary) {
+      actionHint = `Red nodes can be removed.`;
+    } else if (removedNodes.length > 0 && addNodes.length > 0) {
+      actionHint = `Allocate ${addCount}. Red nodes can be removed.`;
+    } else if (removedNodes.length > 0) {
+      actionHint = 'Red nodes can be removed.';
+    }
+    const totalActionNodes = removedNodes.length + addNodes.length;
+    if (totalActionNodes > 6 && addNodes.length > 0) {
+      actionHint = `Allocate ${addCount}. Red nodes can be removed.`;
+    } else if (totalActionNodes > 10 && removedNodes.length > 0) {
+      actionHint = 'Red nodes can be removed. Open build for full tree.';
+    }
+  }
+  if (ascendancyActionHint) {
+    actionHint = actionHint ? `${actionHint} ${ascendancyActionHint}` : ascendancyActionHint;
+  }
+  if (masteryActionHint) {
+    actionHint = actionHint ? `${actionHint} ${masteryActionHint}` : masteryActionHint;
+  }
+
+  return {
+    label,
+    actionHint,
+    renderNodes: displayNodeIds.length > 0 ? displayNodeIds : addNodes,
+    visibleNodeIds: null,
+    inactiveNodeIds: visibleRemovedNodes,
+    highlightNodeId: visibleAddNodes[0] || progress?.nextNodeId || null,
+    highlightNodeIds: visibleAddNodes,
+    sectionHighlight: {
+      previous: [],
+      current: visibleAddNodes,
+      removed: visibleRemovedNodes,
+    },
+    requiresRespec: true,
+  };
+}
 
 function uniqueNodeIds(nodeIds) {
   return Array.from(
@@ -89,6 +374,62 @@ function uniqueNodeIds(nodeIds) {
         .map((id) => String(id))
     )
   );
+}
+
+function resolveClassStartIndex(className) {
+  const normalized = String(className || '').trim().toLowerCase();
+  const map = {
+    scion: 0,
+    marauder: 1,
+    ranger: 2,
+    witch: 3,
+    duelist: 4,
+    templar: 5,
+    shadow: 6,
+  };
+  return map[normalized] ?? null;
+}
+
+function resolveClassStartNodeIds(state, renderer) {
+  const startIndex = resolveClassStartIndex(state?.general?.class || state?.general?.className);
+  const nodes = renderer?.treeData?.nodes;
+  if (startIndex == null || !nodes || typeof nodes !== 'object') return [];
+  return Object.entries(nodes)
+    .filter(([, node]) => Number(node?.classStartIndex) === startIndex)
+    .map(([id]) => String(id));
+}
+
+function canSafelyRespecNodes(activeNodeIds, removedNodeIds, state, renderer) {
+  const active = uniqueNodeIds(activeNodeIds);
+  const removed = new Set(uniqueNodeIds(removedNodeIds));
+  if (active.length === 0 || removed.size === 0) return false;
+
+  const nodes = renderer?.treeData?.nodes;
+  if (!nodes || typeof nodes !== 'object') return false;
+
+  const kept = new Set(active.filter((id) => !removed.has(String(id))));
+  if (kept.size === 0) return false;
+
+  const startIds = resolveClassStartNodeIds(state, renderer).filter((id) => kept.has(id));
+  if (startIds.length === 0) return false;
+
+  const visited = new Set();
+  const queue = [...startIds];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (!id || visited.has(id) || !kept.has(id)) continue;
+    visited.add(id);
+    const node = nodes[id];
+    const neighbors = []
+      .concat(Array.isArray(node?.out) ? node.out : [])
+      .concat(Array.isArray(node?.in) ? node.in : []);
+    neighbors.forEach((nextId) => {
+      const key = String(nextId);
+      if (kept.has(key) && !visited.has(key)) queue.push(key);
+    });
+  }
+
+  return visited.size === kept.size;
 }
 
 const SOCKET_IMG = {
@@ -132,6 +473,8 @@ let buildSettings = {
   openSettingsControllerEnabled: false,
   controllerType: 'auto'
 };
+let quickPreviewZoomFactor = 1;
+let quickPreviewZoomSaveTimer = null;
 let isBuildDragging = false;
 let buildDragOffset = { x: 0, y: 0 };
 let buildDragStartPos = { x: 0, y: 0 };
@@ -755,6 +1098,11 @@ async function loadBuildSettings() {
     if (Number.isFinite(settings.buildQuickPreviewLevelOffset)) {
       buildSettings.quickPreviewLevelOffset = settings.buildQuickPreviewLevelOffset;
       updateQuickPreviewLevelDisplay();
+    }
+    if (Number.isFinite(settings.buildQuickPreviewZoomFactor)) {
+      quickPreviewZoomFactor = Math.max(0.2, Math.min(4, settings.buildQuickPreviewZoomFactor));
+    } else {
+      quickPreviewZoomFactor = 1;
     }
     if (settings.buildLevelPopupPosition) {
       buildSettings.levelPopupPosition = settings.buildLevelPopupPosition;
@@ -1499,6 +1847,13 @@ function showDropdown(feedId) {
 }
 
 function closeDropdown() {
+  if (openDropdownFeedId) {
+    const draftIndex = feeds.findIndex((feed) => feed.id === openDropdownFeedId && feed._draft === true)
+    if (draftIndex >= 0) {
+      feeds.splice(draftIndex, 1)
+      renderFeeds()
+    }
+  }
   feedDropdown.classList.add('hidden');
   openDropdownFeedId = null;
   if (window.managementAPI.setFocusMode) {
@@ -1531,10 +1886,31 @@ async function saveFeedChanges() {
 
   const name = document.getElementById('dropdownName').value.trim();
   const url = document.getElementById('dropdownUrl').value.trim();
+  const existingFeed = feeds.find((feed) => feed.id === openDropdownFeedId) || null;
 
   if (name && url) {
-    await window.managementAPI.updateFeed(openDropdownFeedId, { name, url });
-    console.log('[MANAGEMENT] Feed saved:', name);
+    if (existingFeed?._draft === true) {
+      await window.managementAPI.addFeed({
+        id: openDropdownFeedId,
+        name,
+        url,
+        muted: false,
+        icon: null,
+      });
+      const draftIndex = feeds.findIndex((feed) => feed.id === openDropdownFeedId);
+      if (draftIndex >= 0) {
+        feeds[draftIndex] = {
+          ...feeds[draftIndex],
+          name,
+          url,
+          _draft: false,
+        };
+      }
+      console.log('[MANAGEMENT] Feed created:', name);
+    } else {
+      await window.managementAPI.updateFeed(openDropdownFeedId, { name, url });
+      console.log('[MANAGEMENT] Feed saved:', name);
+    }
   }
 
   closeDropdown();
@@ -1604,6 +1980,14 @@ async function deleteFeed(feedId) {
   const feed = feeds.find(f => f.id === feedId);
   if (!feed) return;
 
+  if (feed._draft === true) {
+    feeds = feeds.filter((entry) => entry.id !== feedId);
+    renderFeeds();
+    closeDropdown();
+    closeContextMenu();
+    return;
+  }
+
   const confirmed = await showConfirmDialog(`Delete feed "${feed.name}"?`);
   if (!confirmed) return;
 
@@ -1621,7 +2005,8 @@ async function addNewFeed() {
     name: 'New Feed',
     url: '',
     muted: false,
-    icon: null
+    icon: null,
+    _draft: true,
   };
 
   // Optimistically add locally for immediate UI feedback
@@ -1631,13 +2016,6 @@ async function addNewFeed() {
   // Open the dropdown so the user can enter name + URL
   showDropdown(newFeed.id);
 
-  // Persist to settings (main process will broadcast updates back)
-  try {
-    await window.managementAPI.addFeed(newFeed);
-    console.log('[MANAGEMENT] Feed placeholder added');
-  } catch (err) {
-    console.error('[MANAGEMENT] Failed to persist new feed:', err);
-  }
 }
 
 // Load feeds
@@ -1648,7 +2026,8 @@ async function loadFeeds() {
       feeds = settings.feeds.map(f => ({
         ...f,
         muted: f.muted || false,
-        icon: f.icon || null
+        icon: f.icon || null,
+        _draft: false,
       }));
     }
     renderFeeds();
@@ -1919,7 +2298,8 @@ window.managementAPI.onSettingsUpdated((newSettings) => {
     feeds = newSettings.feeds.map(f => ({
       ...f,
       muted: f.muted || false,
-      icon: f.icon || null
+      icon: f.icon || null,
+      _draft: false,
     }));
     renderFeeds();
     updateDockMutedState(feeds.length > 0 && feeds.every(f => f.muted));
@@ -2006,6 +2386,12 @@ window.managementAPI.onSettingsUpdated((newSettings) => {
           if (buildQuickPreview && !buildQuickPreview.classList.contains('hidden')) {
             void updateBuildQuickPreview();
           }
+        }
+      }
+      if (Number.isFinite(newSettings.buildQuickPreviewZoomFactor)) {
+        const nextZoomFactor = Math.max(0.2, Math.min(4, newSettings.buildQuickPreviewZoomFactor));
+        if (Math.abs(quickPreviewZoomFactor - nextZoomFactor) > 0.001) {
+          setQuickPreviewZoomFactor(nextZoomFactor, { rerender: true });
         }
       }
       if (newSettings.buildLevelPopupPosition) {
@@ -2451,6 +2837,27 @@ if (quickPreviewLevelPlus) {
     adjustQuickPreviewLevel(1);
   });
 }
+
+function handleQuickPreviewZoomWheel(e) {
+  if ((!e.ctrlKey && !e.metaKey) || !quickPreviewTreeWrap || !buildQuickPreview) return;
+  if (buildQuickPreview.classList.contains('hidden')) return;
+  const target = e.target instanceof Node ? e.target : null;
+  if (!target || !quickPreviewTreeWrap.contains(target)) return;
+  const renderer = ensureQuickPreviewTreeRenderer();
+  if (!renderer) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === 'function') {
+    e.stopImmediatePropagation();
+  }
+  renderer.zoomBy(e.deltaY < 0 ? 0.2 : -0.2);
+  setQuickPreviewZoomFactor(renderer.zoomFactor, { persist: true, rerender: true });
+}
+
+document.addEventListener('wheel', handleQuickPreviewZoomWheel, {
+  passive: false,
+  capture: true,
+});
 
 // Net worth drag handler
 function dragNetWorth(e) {
@@ -3019,64 +3426,151 @@ function resolveSectionTreeLists(sectionTree, viewMode = 'tree') {
 
 function buildTreeProgress(state, level, viewMode = 'tree') {
   const blocks = Array.isArray(state?.blocks) ? state.blocks : [];
-  const buckets = blocks.map((block) => {
-    const sectionTree = state?.guideTreeBySection?.[block.id] || null;
-    const { orderedKeys } = resolveSectionTreeLists(sectionTree, viewMode);
-    return { block, nodes: orderedKeys };
-  });
-
-  const flatOrder = [];
-  const seen = new Set();
-  buckets.forEach((bucket) => {
-    bucket.nodes.forEach((id) => {
-      if (id == null) return;
-      const key = String(id);
-      if (seen.has(key)) return;
-      seen.add(key);
-      flatOrder.push(key);
-    });
-  });
-
   const banditChoice =
     toString(state?.banditChoice) ||
     toString(state?.general?.banditChoice || state?.general?.bandit_choice) ||
     'kill_all';
   const safeLevel = Number.isFinite(level) ? level : 1;
+  const { index: initialSectionIndex, bounds } = getSectionIndexForLevel(blocks, safeLevel);
   const prevPoints = totalPassivePointsAtLevel(Math.max(1, safeLevel - 1), banditChoice);
   const curPoints = totalPassivePointsAtLevel(Math.max(1, safeLevel), banditChoice);
-  const gainedPoints = Math.max(1, curPoints - prevPoints);
-  const nextIndex = flatOrder.length > 0
-    ? Math.max(0, Math.min(flatOrder.length - 1, prevPoints))
-    : 0;
-  const nextNodeId = flatOrder[nextIndex] || null;
-  const highlightNodes = flatOrder.slice(nextIndex, nextIndex + gainedPoints);
 
-  let section = null;
-  let sectionIndex = -1;
-  if (flatOrder.length > 0) {
-    let cursor = 0;
-    for (let i = 0; i < buckets.length; i += 1) {
-      const count = buckets[i].nodes.length;
-      if (count === 0) continue;
-      if (nextIndex < cursor + count) {
-        section = buckets[i].block;
-        sectionIndex = i;
-        break;
-      }
-      cursor += count;
-    }
-    if (!section) {
-      for (let i = buckets.length - 1; i >= 0; i -= 1) {
-        if (buckets[i].nodes.length > 0) {
-          section = buckets[i].block;
-          sectionIndex = i;
-          break;
+  const buildProgressForSection = (sectionIndex) => {
+    const section = sectionIndex >= 0 ? blocks[sectionIndex] || null : null;
+    const sectionBounds = sectionIndex >= 0 ? bounds[sectionIndex] || null : null;
+    const sectionTree = section?.id ? (state?.guideTreeBySection?.[section.id] || null) : null;
+    const { orderedKeys, stepNodeIds, highlight } = resolveSectionTreeLists(sectionTree, viewMode);
+    const previousNodes = uniqueNodeIds(highlight?.previous);
+    const currentNodes = uniqueNodeIds(highlight?.current);
+    const removedNodes = uniqueNodeIds(highlight?.removed);
+    const progressNodes = stepNodeIds.length > 0 ? uniqueNodeIds(stepNodeIds) : uniqueNodeIds(orderedKeys);
+    const actions = Array.isArray(sectionTree?.actions) ? sectionTree.actions : [];
+    const relevantTreeNodeIds = new Set(uniqueNodeIds(previousNodes.concat(currentNodes, removedNodes, progressNodes)));
+    const filteredActions =
+      viewMode === 'tree' && relevantTreeNodeIds.size > 0
+        ? actions.filter((action) => action?.nodeId && relevantTreeNodeIds.has(String(action.nodeId)))
+        : actions;
+
+    const sectionStartLevel = sectionBounds?.start || 1;
+    const pointsBeforeSection = totalPassivePointsAtLevel(Math.max(1, sectionStartLevel - 1), banditChoice);
+
+    if (viewMode === 'tree' && filteredActions.length > 0) {
+      const simulateActions = (earnedPoints) => {
+        let available = Math.max(0, earnedPoints);
+        const active = new Set(previousNodes);
+        const allocated = [];
+        const removed = [];
+        let nextAllocateId = null;
+
+        for (const action of filteredActions) {
+          if (!action || !action.type || !action.nodeId) continue;
+          const nodeId = String(action.nodeId);
+          if (action.type === 'allocate') {
+            if (available <= 0) {
+              nextAllocateId = nodeId;
+              break;
+            }
+            available -= 1;
+            active.add(nodeId);
+            allocated.push(nodeId);
+            continue;
+          }
+          if (action.type === 'deallocate') {
+            if (!active.has(nodeId)) continue;
+            active.delete(nodeId);
+            removed.push(nodeId);
+            available += 1;
+          }
         }
-      }
+
+        return {
+          activeNodeIds: Array.from(active),
+          allocated,
+          removed,
+          nextAllocateId,
+        };
+      };
+
+      const prevSim = simulateActions(prevPoints - pointsBeforeSection);
+      const curSim = simulateActions(curPoints - pointsBeforeSection);
+      const currentStepNodes = curSim.allocated.slice(prevSim.allocated.length);
+      const currentRemovedNodes = curSim.removed.slice(prevSim.removed.length);
+      const nextNodeId =
+        currentStepNodes[0] ||
+        curSim.nextAllocateId ||
+        null;
+
+      return {
+        flatOrder: curSim.allocated,
+        nextIndex: prevSim.allocated.length,
+        nextNodeId,
+        highlightNodes: currentStepNodes,
+        section,
+        sectionIndex,
+        sectionStartIndex: 0,
+        sectionNodeOffset: prevSim.allocated.length,
+        sectionBounds,
+        previousNodes,
+        currentNodes: currentStepNodes,
+        removedNodes: currentRemovedNodes,
+        progressNodes: curSim.allocated,
+        activeNodeIds: uniqueNodeIds(curSim.activeNodeIds),
+        allocatedBeforeCurrentCount: prevSim.allocated.length,
+        allocatedAtCurrentCount: curSim.allocated.length,
+        actionDriven: true,
+      };
+    }
+
+    const allocatedBeforeCurrentCount = Math.max(
+      0,
+      Math.min(progressNodes.length, prevPoints - pointsBeforeSection)
+    );
+    const allocatedAtCurrentCount = Math.max(
+      0,
+      Math.min(progressNodes.length, curPoints - pointsBeforeSection)
+    );
+    const currentStepNodes = progressNodes.slice(allocatedBeforeCurrentCount, allocatedAtCurrentCount);
+    const activeNodeIds = uniqueNodeIds(
+      previousNodes.concat(progressNodes.slice(0, allocatedAtCurrentCount))
+    );
+    const nextNodeId =
+      currentStepNodes[0] ||
+      progressNodes[allocatedAtCurrentCount] ||
+      null;
+
+    return {
+      flatOrder: progressNodes,
+      nextIndex: allocatedBeforeCurrentCount,
+      nextNodeId,
+      highlightNodes: currentStepNodes,
+      section,
+      sectionIndex,
+      sectionStartIndex: 0,
+      sectionNodeOffset: allocatedBeforeCurrentCount,
+      sectionBounds,
+      previousNodes,
+      currentNodes,
+      removedNodes,
+      progressNodes,
+      activeNodeIds,
+      allocatedBeforeCurrentCount,
+      allocatedAtCurrentCount,
+    };
+  };
+
+  const startIndex = initialSectionIndex >= 0 ? initialSectionIndex : 0;
+  for (let idx = startIndex; idx < blocks.length; idx += 1) {
+    const progress = buildProgressForSection(idx);
+    if (
+      progress?.nextNodeId ||
+      (Array.isArray(progress?.highlightNodes) && progress.highlightNodes.length > 0) ||
+      idx === blocks.length - 1
+    ) {
+      return progress;
     }
   }
 
-  return { flatOrder, nextIndex, nextNodeId, highlightNodes, section, sectionIndex };
+  return buildProgressForSection(startIndex);
 }
 
 function updateQuestHint(el, level, highlightCount = 0) {
@@ -3134,6 +3628,29 @@ function positionBuildQuickPreview() {
   buildQuickPreview.style.right = 'auto';
 }
 
+function persistQuickPreviewZoomFactor() {
+  if (quickPreviewZoomSaveTimer) {
+    clearTimeout(quickPreviewZoomSaveTimer);
+  }
+  quickPreviewZoomSaveTimer = setTimeout(() => {
+    quickPreviewZoomSaveTimer = null;
+    window.managementAPI.saveSettings({ buildQuickPreviewZoomFactor: quickPreviewZoomFactor });
+  }, 150);
+}
+
+function setQuickPreviewZoomFactor(nextFactor, { persist = false, rerender = false } = {}) {
+  quickPreviewZoomFactor = Math.max(0.2, Math.min(4, Number(nextFactor) || 1));
+  if (quickPreviewTreeRenderer) {
+    quickPreviewTreeRenderer.setZoomFactor(quickPreviewZoomFactor);
+  }
+  if (persist) {
+    persistQuickPreviewZoomFactor();
+  }
+  if (rerender && buildQuickPreview && !buildQuickPreview.classList.contains('hidden')) {
+    void updateBuildQuickPreview();
+  }
+}
+
 function hideBuildQuickPreview() {
   if (!buildQuickPreview) return;
   buildQuickPreview.classList.add('hidden');
@@ -3167,6 +3684,7 @@ async function updateBuildQuickPreview() {
     if (!state || !Array.isArray(state.blocks) || state.blocks.length === 0) {
       quickPreviewSection.textContent = 'Select a build';
       if (quickPreviewNodeLabel) quickPreviewNodeLabel.textContent = '--';
+      setPreviewActionHint(quickPreviewActionHint, '');
       updateQuickPreviewLevelDisplay();
       updateQuestHint(quickPreviewQuestHint, getQuickPreviewLevel(buildSettings.characterLevel || 1), 0);
       if (emptyTarget) {
@@ -3186,6 +3704,7 @@ async function updateBuildQuickPreview() {
     if (!section) {
       quickPreviewSection.textContent = 'Section unavailable';
       if (quickPreviewNodeLabel) quickPreviewNodeLabel.textContent = '--';
+      setPreviewActionHint(quickPreviewActionHint, '');
       updateQuestHint(quickPreviewQuestHint, previewLevel, 0);
       if (emptyTarget) {
         const empty = document.createElement('div');
@@ -3200,36 +3719,37 @@ async function updateBuildQuickPreview() {
     const rangeText = formatLevelRange(section);
     quickPreviewSection.textContent = rangeText ? `${title} - ${rangeText}` : title;
 
-    const nextIndex = progress.nextIndex;
-    const nextNodeId = progress.nextNodeId;
-    const highlightNodes = progress.highlightNodes;
     const sectionTree = state?.guideTreeBySection?.[section.id] || null;
-    updateQuestHint(quickPreviewQuestHint, previewLevel, highlightNodes.length);
+    const treeInstruction = buildPopupTreeInstruction(progress, sectionTree, state, quickPreviewTreeRenderer);
+    updateQuestHint(quickPreviewQuestHint, previewLevel, progress.highlightNodes.length);
+    setPreviewActionHint(quickPreviewActionHint, treeInstruction.actionHint, { respec: treeInstruction.requiresRespec });
     if (quickPreviewNodeLabel) {
-      quickPreviewNodeLabel.dataset.nodeId = nextNodeId ? String(nextNodeId) : '';
-      quickPreviewNodeLabel.textContent = formatAllocateLabel(highlightNodes, state, quickPreviewTreeRenderer);
+      quickPreviewNodeLabel.dataset.nodeId = treeInstruction.highlightNodeId ? String(treeInstruction.highlightNodeId) : '';
+      quickPreviewNodeLabel.textContent = treeInstruction.label;
     }
     const className = toString(state.general?.class || state.general?.className) || null;
-    const renderNodes = progress.flatOrder.length > 0
-      ? progress.flatOrder.slice(0, Math.max(0, nextIndex)).concat(nextNodeId ? [nextNodeId] : [])
-      : nextNodeId ? [nextNodeId] : [];
     const treeRenderer = ensureQuickPreviewTreeRenderer();
-    if (showTree && treeRenderer && renderNodes.length > 0) {
-      treeRenderer.render(renderNodes, {
-        highlightNodeId: nextNodeId || null,
-        highlightNodeIds: highlightNodes,
+    if (showTree && treeRenderer && treeInstruction.renderNodes.length > 0) {
+      treeRenderer.render(treeInstruction.renderNodes, {
+        highlightNodeId: treeInstruction.highlightNodeId,
+        highlightNodeIds: treeInstruction.highlightNodeIds,
+        visibleNodeIds: treeInstruction.visibleNodeIds,
+        inactiveNodeIds: treeInstruction.inactiveNodeIds,
         className,
         showAllNodes: true,
         centerOnHighlight: true,
         viewMode: 'tree',
         transparentBackground: true,
-        sectionHighlight: sectionTree?.highlight || null,
+        sectionHighlight: treeInstruction.sectionHighlight,
+        masterySelections: sectionTree?.masterySelections || {},
       });
-      if (quickPreviewNodeLabel && highlightNodes.length > 0 && typeof treeRenderer.ensureLoaded === 'function') {
-        const pendingId = nextNodeId ? String(nextNodeId) : '';
+      if (quickPreviewNodeLabel && progress.highlightNodes.length > 0 && typeof treeRenderer.ensureLoaded === 'function') {
+        const pendingId = treeInstruction.highlightNodeId ? String(treeInstruction.highlightNodeId) : '';
         void treeRenderer.ensureLoaded().then(() => {
           if (!quickPreviewNodeLabel || quickPreviewNodeLabel.dataset.nodeId !== pendingId) return;
-          quickPreviewNodeLabel.textContent = formatAllocateLabel(highlightNodes, state, treeRenderer);
+          const loadedInstruction = buildPopupTreeInstruction(progress, sectionTree, state, treeRenderer);
+          quickPreviewNodeLabel.textContent = loadedInstruction.label;
+          setPreviewActionHint(quickPreviewActionHint, loadedInstruction.actionHint, { respec: loadedInstruction.requiresRespec });
         });
       }
     } else if (showTree && quickPreviewTreeCanvas) {
@@ -3312,17 +3832,18 @@ function ensureQuickPreviewTreeRenderer() {
   if (!quickPreviewTreeRenderer) {
     quickPreviewTreeRenderer = new window.TreePreviewRenderer(quickPreviewTreeCanvas, {
       zoomFactor: 1,
-      minZoom: 0.131,
-      maxZoom: 0.131,
+      minZoom: 0.02,
+      maxZoom: 0.5,
       transparentBackground: true,
       highlightRingScale: 0.8,
       highlightRingWidth: 4,
       highlightRingColor: 'rgba(255, 208, 64, 0.95)',
       highlightGlowColor: 'rgba(255, 208, 64, 0.9)',
       highlightGlowBlur: 40,
-      highlightFillColor: 'rgba(255, 208, 64, 0.22)',
-      highlightOuterScale: 0.95,
-    });
+        highlightFillColor: 'rgba(255, 208, 64, 0.22)',
+        highlightOuterScale: 0.95,
+      });
+    quickPreviewTreeRenderer.setZoomFactor(quickPreviewZoomFactor);
   }
   return quickPreviewTreeRenderer;
 }
@@ -3434,6 +3955,7 @@ async function showLevelUpPopup(level, options = {}) {
 
       if (!state || !Array.isArray(state.blocks) || !state.guideTreeBySection) {
       if (levelUpNodeLabel) levelUpNodeLabel.textContent = 'Select a build to enable guide info.';
+      setPreviewActionHint(levelUpActionHint, '');
       updateQuestHint(levelUpQuestHint, previewLevel, 0);
       clearTimeout(levelPopupTimer);
       if (!pinned) {
@@ -3449,40 +3971,40 @@ async function showLevelUpPopup(level, options = {}) {
   }
 
   const progress = buildTreeProgress(state, previewLevel, 'tree');
-  const nextIndex = progress.nextIndex;
-  const nextNodeId = progress.nextNodeId;
-  const highlightNodes = progress.highlightNodes;
   const sectionTree = state?.guideTreeBySection?.[progress.section?.id] || null;
-  updateQuestHint(levelUpQuestHint, previewLevel, highlightNodes.length);
-  const nodeLabel = formatAllocateLabel(highlightNodes, state, levelPopupRenderer);
+  const treeInstruction = buildPopupTreeInstruction(progress, sectionTree, state, levelPopupRenderer);
+  updateQuestHint(levelUpQuestHint, previewLevel, progress.highlightNodes.length);
+  setPreviewActionHint(levelUpActionHint, treeInstruction.actionHint, { respec: treeInstruction.requiresRespec });
 
   if (levelUpNodeLabel) {
-    levelUpNodeLabel.dataset.nodeId = nextNodeId ? String(nextNodeId) : '';
-    levelUpNodeLabel.textContent = nodeLabel;
+    levelUpNodeLabel.dataset.nodeId = treeInstruction.highlightNodeId ? String(treeInstruction.highlightNodeId) : '';
+    levelUpNodeLabel.textContent = treeInstruction.label;
   }
 
   const renderer = ensureLevelPopupRenderer();
-  const renderNodes = progress.flatOrder.length > 0
-    ? progress.flatOrder.slice(0, Math.max(0, nextIndex)).concat(nextNodeId ? [nextNodeId] : [])
-    : nextNodeId ? [nextNodeId] : [];
-  if (renderer && renderNodes.length > 0) {
+  if (renderer && treeInstruction.renderNodes.length > 0) {
     const className = toString(state.general?.class || state.general?.className) || null;
     requestAnimationFrame(() => {
-      renderer.render(renderNodes, {
-        highlightNodeId: nextNodeId || null,
-        highlightNodeIds: highlightNodes,
+      renderer.render(treeInstruction.renderNodes, {
+        highlightNodeId: treeInstruction.highlightNodeId,
+        highlightNodeIds: treeInstruction.highlightNodeIds,
+        visibleNodeIds: treeInstruction.visibleNodeIds,
+        inactiveNodeIds: treeInstruction.inactiveNodeIds,
         className,
         showAllNodes: true,
-        centerOnHighlight: true,
+        centerOnHighlight: !treeInstruction.requiresRespec,
         viewMode: 'tree',
         transparentBackground: true,
-        sectionHighlight: sectionTree?.highlight || null,
+        sectionHighlight: treeInstruction.sectionHighlight,
+        masterySelections: sectionTree?.masterySelections || {},
       });
-      if (levelUpNodeLabel && highlightNodes.length > 0 && typeof renderer.ensureLoaded === 'function') {
-        const pendingId = nextNodeId ? String(nextNodeId) : '';
+      if (levelUpNodeLabel && progress.highlightNodes.length > 0 && typeof renderer.ensureLoaded === 'function') {
+        const pendingId = treeInstruction.highlightNodeId ? String(treeInstruction.highlightNodeId) : '';
         void renderer.ensureLoaded().then(() => {
           if (!levelUpNodeLabel || levelUpNodeLabel.dataset.nodeId !== pendingId) return;
-          levelUpNodeLabel.textContent = formatAllocateLabel(highlightNodes, state, renderer);
+          const loadedInstruction = buildPopupTreeInstruction(progress, sectionTree, state, renderer);
+          levelUpNodeLabel.textContent = loadedInstruction.label;
+          setPreviewActionHint(levelUpActionHint, loadedInstruction.actionHint, { respec: loadedInstruction.requiresRespec });
         });
       }
     });

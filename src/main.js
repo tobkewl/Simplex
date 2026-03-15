@@ -13,7 +13,6 @@ const { createOverlayWindowFactories } = require('./main/windows/overlay-windows
 const { createShellWindowFactories } = require('./main/windows/shell-windows');
 const { createFeedWindowFactories } = require('./main/windows/feed-windows');
 const { createMiscWindowFactories } = require('./main/windows/misc-windows');
-const { createFeedDebuggerService } = require('./main/services/feed-debugger');
 const { createLiveTrackingService } = require('./main/services/live-tracking-service');
 const { createPoeInputScriptService } = require('./main/services/poe-input-script');
 const { createAppSupportService } = require('./main/services/app-support');
@@ -544,15 +543,6 @@ function openFeedbackModal(type = 'bug') {
   }
 }
 
-const { setupFeedDebugger } = createFeedDebuggerService({
-  logger,
-  feedMeta,
-  onTradeEventsObserved: () => {
-    status.lastEventTs = Date.now();
-  },
-  forwardToOverlay,
-});
-
 const {
   createFeedWindow,
   createFeedWindowFor,
@@ -564,7 +554,7 @@ const {
   partition: PARTITION,
   baseDir: __dirname,
   isValidLiveFeedUrl,
-  setupFeedDebugger,
+  feedMeta,
   getFeedWindow: () => feedWindow,
   setFeedWindow: (nextWindow) => {
     feedWindow = nextWindow;
@@ -577,17 +567,9 @@ const {
 function destroyAllFeeds() {
   logger.info('feed:destroyAll:start', { count: feedWindows.length + (feedWindow ? 1 : 0) });
   
-  // Detach debuggers before destroying windows to prevent alerts from continuing
   for (const w of feedWindows) {
     try {
       if (w && !w.isDestroyed()) {
-        const wc = w.webContents;
-        const id = wc.id;
-        const dbg = wc.debugger;
-        if (dbg && dbg.isAttached()) {
-          dbg.detach();
-        }
-        feedMeta.delete(id);
         w.destroy();
       }
     } catch {}
@@ -595,17 +577,11 @@ function destroyAllFeeds() {
   
   try { 
     if (feedWindow && !feedWindow.isDestroyed()) {
-      const wc = feedWindow.webContents;
-      const id = wc.id;
-      const dbg = wc.debugger;
-      if (dbg && dbg.isAttached()) {
-        dbg.detach();
-      }
-      feedMeta.delete(id);
       feedWindow.destroy();
     }
   } catch {}
   
+  feedMeta.clear();
   feedWindow = null;
   feedWindows = [];
   status.activeFeeds = 0;

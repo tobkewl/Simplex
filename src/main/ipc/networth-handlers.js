@@ -22,6 +22,8 @@ const PRICING_CONFIG_CACHE_MS = 60 * 60 * 1000;
 const CURRENCY_SHARD_DIVISOR = 20;
 const STASH_SCAN_RETRY_MS = 60 * 1000;
 const STASH_SCAN_BATCH_RETRY_MS = 1500;
+const PRICING_QUEUE_REQUEST_INTERVAL_MS = 5000;
+const PRICING_QUEUE_REMOTE_PERSIST_INTERVAL_MS = 10000;
 const RATE_LIMIT_MIN_RETRY_MS = 1500;
 const RATE_LIMIT_MAX_RETRY_MS = 5 * 60 * 1000;
 const AUTO_QUEUE_UNPRICED_MAX_FAILURES = 2;
@@ -82,6 +84,7 @@ function normalizePricingOptions(options) {
   return {
     ...source,
     listingMode: normalizePricingListingMode(source.listingMode),
+    queueMode: source.queueMode === true,
   };
 }
 
@@ -2698,8 +2701,9 @@ function registerUnavailableHandlers(ipcMain) {
     'networth:getActiveRun': null,
     'networth:priceItem': { success: false, error: WEBSITE_FEATURE_MESSAGE },
     'networth:getPricingQueue': [],
+    'networth:pausePricingQueue': false,
     'networth:resumePricingQueue': false,
-    'networth:getTaskQueue': { pricing: [], scan: [] },
+    'networth:getTaskQueue': { pricing: [], scan: [], pricingPaused: false },
     'networth:removePricingQueueItem': false,
     'networth:clearPricingQueue': false,
     'networth:enqueuePricingItems': { queued: 0, error: WEBSITE_FEATURE_MESSAGE },
@@ -2744,6 +2748,7 @@ function registerNetworthIpcHandlers({
     pricingQueue: [],
     scanQueue: [],
     pricingQueueRunning: false,
+    pricingQueuePaused: false,
     stashEndpointTemplateByKey: new Map(),
     stashOverviewEndpointByKey: new Map(),
     characterCacheByRealm: new Map(),
@@ -2760,6 +2765,8 @@ function registerNetworthIpcHandlers({
     pricingConfigFetchedAt: 0,
     rateLimits: normalizeRateLimitState(),
     pricingFailureStateByItemKey: {},
+    latestScanDirty: false,
+    latestScanPersistedAt: 0,
   };
 
   const getApiClientOrThrow = () => {
@@ -2835,6 +2842,8 @@ function registerNetworthIpcHandlers({
         .slice(0, PRICING_QUEUE_LIMIT);
     }
 
+    state.pricingQueuePaused = settings.netWorthPricingQueuePaused === true;
+
     if (Array.isArray(settings.netWorthScanQueue)) {
       state.scanQueue = settings.netWorthScanQueue
         .map((entry) => {
@@ -2870,6 +2879,7 @@ function registerNetworthIpcHandlers({
     settings.netWorthPricingConfig = state.pricingConfig;
     settings.netWorthPricingConfigFetchedAt = state.pricingConfigFetchedAt;
     settings.netWorthPricingQueue = state.pricingQueue.slice(0, PRICING_QUEUE_LIMIT);
+    settings.netWorthPricingQueuePaused = state.pricingQueuePaused === true;
     settings.netWorthScanQueue = state.scanQueue;
     settings.netWorthRateLimits = normalizeRateLimitState(state.rateLimits);
     settings.netWorthPricingFailureStateByItemKey = normalizePricingFailureStateMap(state.pricingFailureStateByItemKey);
@@ -2951,7 +2961,46 @@ function registerNetworthIpcHandlers({
   const persistLatestScanRemote = async () => {
     if (!asObject(state.lastScan)) return false;
     const apiClient = getApiClient();
-    return saveScanSnapshotRemote(apiClient, logger, state.lastScan);
+    const saved = await saveScanSnapshotRemote(apiClient, logger, state.lastScan);
+    if (saved) {
+      state.latestScanDirty = false;
+      state.latestScanPersistedAt = Date.now();
+    }
+    return saved;
+  };
+
+  const markLatestScanDirty = () => {
+    state.latestScanDirty = true;
+    if (!Number.isFinite(Number(state.latestScanPersistedAt)) || Number(state.latestScanPersistedAt) <= 0) {
+      state.latestScanPersistedAt = Date.now();
+    }
+  };
+
+  const flushLatestScanRemoteIfDue = async ({ force = false } = {}) => {
+    if (state.latestScanDirty !== true) return false;
+    if (!force) {
+      const elapsedMs = Date.now() - Number(state.latestScanPersistedAt || 0);
+      if (elapsedMs < PRICING_QUEUE_REMOTE_PERSIST_INTERVAL_MS) {
+        return false;
+      }
+    }
+    return persistLatestScanRemote();
+  };
+
+  const waitForPricingQueue = async (delayMs) => {
+    const remainingTotalMs = Math.max(0, Number(delayMs) || 0);
+    if (remainingTotalMs <= 0) return true;
+    const stepMs = 250;
+    let remainingMs = remainingTotalMs;
+    while (remainingMs > 0) {
+      if (state.pricingQueuePaused === true) {
+        return false;
+      }
+      const nextStepMs = Math.min(stepMs, remainingMs);
+      await wait(nextStepMs);
+      remainingMs -= nextStepMs;
+    }
+    return state.pricingQueuePaused !== true;
   };
 
   const prunePricingQueue = () => {
@@ -3174,12 +3223,18 @@ function registerNetworthIpcHandlers({
     state.pricingQueueRunning = true;
     try {
       while (true) {
+        if (state.pricingQueuePaused === true) {
+          break;
+        }
         const nextEntry = state.pricingQueue.find((entry) => entry.status === 'queued');
         if (!nextEntry) break;
 
         const activeCooldownMs = getRateLimitDelayMs(state, 'pricing');
         if (activeCooldownMs > 0) {
-          await wait(activeCooldownMs);
+          const shouldContinue = await waitForPricingQueue(activeCooldownMs);
+          if (!shouldContinue) {
+            break;
+          }
           continue;
         }
         nextEntry.status = 'processing';
@@ -3212,8 +3267,9 @@ function registerNetworthIpcHandlers({
             throw new Error('Item has no valid base type for trade pricing. Re-sync this stash tab and try again.');
           }
           const pricingOptions = normalizePricingOptions({
-            useCache: false,
+            useCache: true,
             listingMode: getSettings()?.netWorthPricingListingMode,
+            queueMode: true,
           });
           logger.info('networth:pricing:request', {
             mode: 'queue',
@@ -3251,7 +3307,8 @@ function registerNetworthIpcHandlers({
           upsertQueueEntryFromPricing(nextEntry.item, nextEntry.league, parsedPricing, null);
           clearPricingFailureState(nextEntry.itemKey);
           applyPricingToState(state, nextEntry.itemKey, parsedPricing);
-          await persistLatestScanRemote();
+          markLatestScanDirty();
+          await flushLatestScanRemoteIfDue();
         } catch (error) {
           const message = buildErrorMessage(error);
           if (isRateLimitError(error)) {
@@ -3276,14 +3333,24 @@ function registerNetworthIpcHandlers({
         }
 
         persistState();
+        if (state.pricingQueuePaused === true) {
+          break;
+        }
         const cooldownMs = getRateLimitDelayMs(state, 'pricing');
         if (cooldownMs > 0) {
-          await wait(cooldownMs);
+          const shouldContinue = await waitForPricingQueue(cooldownMs);
+          if (!shouldContinue) {
+            break;
+          }
           continue;
         }
-        await wait(450);
+        const shouldContinue = await waitForPricingQueue(PRICING_QUEUE_REQUEST_INTERVAL_MS);
+        if (!shouldContinue) {
+          break;
+        }
       }
     } finally {
+      await flushLatestScanRemoteIfDue({ force: true });
       state.pricingQueueRunning = false;
     }
   };
@@ -4131,6 +4198,7 @@ function registerNetworthIpcHandlers({
   ipcMain.handle('networth:getTaskQueue', async () => ({
       pricing: state.pricingQueue,
       scans: state.scanQueue,
+      pricingPaused: state.pricingQueuePaused,
       rateLimits: state.rateLimits,
       cachedStashTabs: state.cachedStashTabs,
       scanHistoryClearedAt: state.scanHistoryClearedAt,
@@ -4142,9 +4210,20 @@ function registerNetworthIpcHandlers({
     ipcMain.handle('networth:getPricingQueue', async () => state.pricingQueue);
 
     try {
+      ipcMain.removeHandler('networth:pausePricingQueue');
+    } catch {}
+    ipcMain.handle('networth:pausePricingQueue', async () => {
+      state.pricingQueuePaused = true;
+      persistState();
+      return true;
+    });
+
+    try {
       ipcMain.removeHandler('networth:resumePricingQueue');
     } catch {}
     ipcMain.handle('networth:resumePricingQueue', async () => {
+      state.pricingQueuePaused = false;
+      persistState();
       processPricingQueue().catch((error) => {
         logger.warn('networth:pricing-queue:resume-failed', { error: buildErrorMessage(error) });
       });
@@ -4169,6 +4248,7 @@ function registerNetworthIpcHandlers({
     } catch {}
     ipcMain.handle('networth:clearPricingQueue', async () => {
       state.pricingQueue = [];
+      state.pricingQueuePaused = false;
       persistState();
       return true;
     });

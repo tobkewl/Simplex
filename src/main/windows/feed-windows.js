@@ -6,7 +6,7 @@ function createFeedWindowFactories({
   partition,
   baseDir,
   isValidLiveFeedUrl,
-  setupFeedDebugger,
+  feedMeta,
   getFeedWindow,
   setFeedWindow,
   getFeedWindows,
@@ -55,6 +55,13 @@ function createFeedWindowFactories({
     win.on('closed', () => {
       const next = getFeedWindows().filter((entry) => entry !== win);
       setFeedWindows(next);
+      try {
+        for (const [key, meta] of feedMeta.entries()) {
+          if (meta?.window === win) {
+            feedMeta.delete(key);
+          }
+        }
+      } catch {}
       if (resetPrimaryOnClose && getFeedWindow() === win) {
         setFeedWindow(null);
       }
@@ -74,7 +81,13 @@ function createFeedWindowFactories({
 
     win.loadURL(normalizedUrl);
     try { win.webContents.setAudioMuted(true); } catch {}
-    try { setupFeedDebugger(win, normalizedUrl, feedInfo); } catch {}
+    feedMeta.set(feedInfo.url || normalizedUrl, {
+      liveUrl: normalizedUrl,
+      feedId: feedInfo.id || '',
+      feedName: feedInfo.name || '',
+      feedUrl: feedInfo.url || normalizedUrl,
+      window: win,
+    });
     attachFeedWindowDiagnostics(win);
     trackFeedWindow(win, { resetPrimaryOnClose: true });
 
@@ -94,7 +107,13 @@ function createFeedWindowFactories({
 
     win.loadURL(normalizedUrl);
     try { win.webContents.setAudioMuted(true); } catch {}
-    try { setupFeedDebugger(win, normalizedUrl, feedInfo); } catch {}
+    feedMeta.set(feedInfo.url || normalizedUrl, {
+      liveUrl: normalizedUrl,
+      feedId: feedInfo.id || '',
+      feedName: feedInfo.name || '',
+      feedUrl: feedInfo.url || normalizedUrl,
+      window: win,
+    });
     attachFeedWindowDiagnostics(win);
     trackFeedWindow(win, { resetPrimaryOnClose: false });
 

@@ -399,6 +399,18 @@ body {
   grid-row: 1;
 }
 
+.preview-action-hint {
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(255, 244, 214, 0.82);
+  grid-column: 1 / -1;
+  margin-top: -1px;
+}
+
+.preview-action-hint.respec {
+  color: rgba(255, 211, 211, 0.88);
+}
+
 .quick-preview-tree {
   border-radius: 10px;
   overflow: visible;

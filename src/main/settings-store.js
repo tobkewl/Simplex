@@ -155,12 +155,6 @@ function createSettingsStore({ app, path, fs, logger }) {
   function saveSettings(s) {
     try {
       const cleanedSettings = { ...s };
-      if (Array.isArray(cleanedSettings.feeds)) {
-        cleanedSettings.feeds = cleanedSettings.feeds.map((feed) => {
-          const { muted, ...feedWithoutMuted } = feed;
-          return feedWithoutMuted;
-        });
-      }
       fs.mkdirSync(app.getPath('userData'), { recursive: true });
       const settingsFile = settingsPath();
       const serialized = JSON.stringify(cleanedSettings, null, 2);

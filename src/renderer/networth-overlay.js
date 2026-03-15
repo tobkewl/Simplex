@@ -1,4 +1,4 @@
-// Net Worth Overlay - Volledig herwerkt met iconen en breakdown
+// Net Worth Overlay
 let MIRAGE_STACKABLE_CURRENCY_BY_NAME = {};
 let MIRAGE_STACKABLE_CURRENCY_BY_KEY = {};
 let normalizeMirageStackableCurrencyKey = (value) => String(value || '').trim().toLowerCase();
@@ -76,7 +76,7 @@ let lastPricingUpdateTs = 0;
 let queueViewLoading = false;
 let queueViewFilter = loadPersistedQueueViewFilter();
 let scanHistoryClearedAt = 0;
-let latestTaskQueueData = { pricing: [], scans: [] };
+let latestTaskQueueData = { pricing: [], scans: [], pricingPaused: false };
 let valueDisplayCurrency = 'chaos';
 let availableCharacters = [];
 let availableStashTabs = [];
@@ -345,7 +345,7 @@ function getItemIconHtml(item) {
 
   const itemName = item.name || item.typeLine || 'Unknown Item';
   
-  // ALTIJD eerst proberen currency key te vinden (betrouwbaarder dan item.icon)
+  // Prefer the currency key first because it is more reliable than item.icon.
   const currencyKey = getCurrencyKeyFromItemName(itemName);
   if (currencyKey && CURRENCY_ICONS[currencyKey]) {
     const cdnFallback = getCdnFallbackUrl(itemName);
@@ -353,7 +353,7 @@ function getItemIconHtml(item) {
     return `<img src="${escapeHtml(iconPath)}" alt="${escapeHtml(itemName)}" onerror="this.onerror=null; this.src='${escapeHtml(cdnFallback)}'; this.onerror=function(){this.parentElement.innerHTML='?';}">`;
   }
   
-  // Als geen currency key match, probeer item.icon
+  // If no currency key matches, fall back to item.icon.
   if (item.icon) {
     const cdnFallback = getCdnFallbackUrl(itemName);
     return `<img src="${escapeHtml(item.icon)}" alt="${escapeHtml(itemName)}" onerror="this.onerror=null; this.src='${escapeHtml(cdnFallback)}'; this.onerror=function(){this.parentElement.innerHTML='?';}">`;
@@ -1459,6 +1459,7 @@ function showContextMenu(x, y, tabIndex) {
   }
   const actionTabIndices = getSelectedTabIndicesForActions(tabIndex);
   const queueableCount = getQueueableCountForTabIndices(actionTabIndices);
+  const unpricedQueueableCount = getUnpricedQueueableCountForTabIndices(actionTabIndices);
 
   menu.innerHTML = '';
 
@@ -1480,8 +1481,19 @@ function showContextMenu(x, y, tabIndex) {
     });
   }
 
+  const smartPriceUnpricedTabsItem = document.createElement('div');
+  smartPriceUnpricedTabsItem.className = `context-menu-item${unpricedQueueableCount > 0 ? '' : ' disabled'}`;
+  smartPriceUnpricedTabsItem.textContent = 'Smart price unpriced only.';
+  if (unpricedQueueableCount > 0) {
+    smartPriceUnpricedTabsItem.addEventListener('click', async () => {
+      closeContextMenu();
+      await queueTabItemsForSmartPricing(actionTabIndices, { onlyUnpriced: true });
+    });
+  }
+
   menu.appendChild(scanTabsItem);
   menu.appendChild(smartPriceTabsItem);
+  menu.appendChild(smartPriceUnpricedTabsItem);
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.style.display = 'block';
@@ -1710,6 +1722,9 @@ function showItemContextMenu(x, y, item) {
   const queueableSelectionCount = (viewData?.items || []).filter((entry) => (
     selectedItemIds.has(String(entry?.id)) && isQueueableForSmartPricing(entry)
   )).length;
+  const unpricedQueueableSelectionCount = (viewData?.items || []).filter((entry) => (
+    selectedItemIds.has(String(entry?.id)) && isUnpricedQueueableForSmartPricing(entry)
+  )).length;
 
   const queueItem = document.createElement('div');
   queueItem.className = `context-menu-item${queueableSelectionCount > 0 ? '' : ' disabled'}`;
@@ -1718,6 +1733,16 @@ function showItemContextMenu(x, y, item) {
     queueItem.addEventListener('click', () => {
       closeContextMenu();
       queueSelectedItemsForSmartPricing();
+    });
+  }
+
+  const queueUnpricedItem = document.createElement('div');
+  queueUnpricedItem.className = `context-menu-item${unpricedQueueableSelectionCount > 0 ? '' : ' disabled'}`;
+  queueUnpricedItem.textContent = 'Queue unpriced for smart pricing';
+  if (unpricedQueueableSelectionCount > 0) {
+    queueUnpricedItem.addEventListener('click', () => {
+      closeContextMenu();
+      queueSelectedItemsForSmartPricing({ onlyUnpriced: true });
     });
   }
 
@@ -1733,6 +1758,7 @@ function showItemContextMenu(x, y, item) {
 
   menu.innerHTML = '';
   menu.appendChild(queueItem);
+  menu.appendChild(queueUnpricedItem);
   menu.appendChild(manualItem);
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -1762,6 +1788,15 @@ function isQueueableForSmartPricing(item) {
   const typeLine = normalizeItemTextForQueue(item.typeLine || item.type_line || '');
   const baseType = normalizeItemTextForQueue(item.baseType || item.base_type || '');
   return Boolean(typeLine || baseType);
+}
+
+function hasPositiveSmartPrice(item) {
+  const rawValue = Number(item?._networth?.value);
+  return Number.isFinite(rawValue) && rawValue > 0;
+}
+
+function isUnpricedQueueableForSmartPricing(item) {
+  return isQueueableForSmartPricing(item) && !hasPositiveSmartPrice(item);
 }
 
 function getSelectedTabIndicesForActions(fallbackTabIndex = null) {
@@ -1802,7 +1837,17 @@ function getQueueableCountForTabIndices(tabIndices) {
   )).length;
 }
 
-async function queueTabItemsForSmartPricing(tabIndices) {
+function getUnpricedQueueableCountForTabIndices(tabIndices) {
+  if (!Array.isArray(tabIndices) || tabIndices.length === 0) return 0;
+  const tabSet = new Set(tabIndices);
+  const sourceData = getBaseStashViewData();
+  const sourceItems = Array.isArray(sourceData?.items) ? sourceData.items : [];
+  return sourceItems.filter((entry) => (
+    tabSet.has(resolveItemTabIndex(entry)) && isUnpricedQueueableForSmartPricing(entry)
+  )).length;
+}
+
+async function queueTabItemsForSmartPricing(tabIndices, { onlyUnpriced = false } = {}) {
   if (!Array.isArray(tabIndices) || tabIndices.length === 0) {
     alert('Select at least one stash tab first.');
     return;
@@ -1817,11 +1862,16 @@ async function queueTabItemsForSmartPricing(tabIndices) {
 
   const tabSet = new Set(tabIndices);
   const itemsToQueue = sourceItems.filter((entry) => (
-    tabSet.has(resolveItemTabIndex(entry)) && isQueueableForSmartPricing(entry)
+    tabSet.has(resolveItemTabIndex(entry))
+      && (onlyUnpriced ? isUnpricedQueueableForSmartPricing(entry) : isQueueableForSmartPricing(entry))
   ));
 
   if (itemsToQueue.length === 0) {
-    alert('No queueable items found in the selected stash tab(s). Smart pricing supports magic, rare, and unique items.');
+    alert(
+      onlyUnpriced
+        ? 'No unpriced queueable items found in the selected stash tab(s).'
+        : 'No queueable items found in the selected stash tab(s). Smart pricing supports magic, rare, and unique items.'
+    );
     return;
   }
 
@@ -1834,10 +1884,11 @@ async function queueTabItemsForSmartPricing(tabIndices) {
     const taskName = tabNames.length <= 2
       ? tabNames.join(', ')
       : `${tabNames.length} tabs`;
+    const taskType = onlyUnpriced ? 'tab_smart_price_unpriced' : 'tab_smart_price';
     let queueTask = null;
     try {
       queueTask = await window.networthOverlayAPI.enqueueScanTask({
-        type: 'tab_smart_price',
+        type: taskType,
         name: taskName,
         league,
         status: 'in_progress',
@@ -1853,7 +1904,7 @@ async function queueTabItemsForSmartPricing(tabIndices) {
     if (queueTask?.id) {
       await window.networthOverlayAPI.enqueueScanTask({
         id: queueTask.id,
-        type: 'tab_smart_price',
+        type: taskType,
         name: taskName,
         league,
         status: result?.queued > 0 ? 'queued' : 'failed',
@@ -1867,7 +1918,7 @@ async function queueTabItemsForSmartPricing(tabIndices) {
     }
 
     if (result?.queued > 0) {
-      console.log(`[PRICING] Queued ${result.queued} items from tab selection for smart pricing`);
+      console.log(`[PRICING] Queued ${result.queued} ${onlyUnpriced ? 'unpriced ' : ''}items from tab selection for smart pricing`);
       if (queueViewActive) {
         loadQueueView();
       }
@@ -1888,8 +1939,9 @@ async function queueTabItemsForSmartPricing(tabIndices) {
       const taskName = tabNames.length <= 2
         ? tabNames.join(', ')
         : `${tabNames.length} tabs`;
+      const taskType = onlyUnpriced ? 'tab_smart_price_unpriced' : 'tab_smart_price';
       await window.networthOverlayAPI.enqueueScanTask({
-        type: 'tab_smart_price',
+        type: taskType,
         name: taskName,
         league,
         status: 'failed',
@@ -1905,7 +1957,7 @@ async function queueTabItemsForSmartPricing(tabIndices) {
   }
 }
 
-async function queueSelectedItemsForSmartPricing() {
+async function queueSelectedItemsForSmartPricing({ onlyUnpriced = false } = {}) {
   const viewData = getViewData();
   if (!viewData || !viewData.items || selectedItems.size === 0) {
     alert('Select at least one priceable item first.');
@@ -1914,10 +1966,15 @@ async function queueSelectedItemsForSmartPricing() {
 
   const selectedItemIds = new Set(Array.from(selectedItems).map((entry) => String(entry)));
   const itemsToQueue = viewData.items.filter((entry) => (
-    selectedItemIds.has(String(entry?.id)) && isQueueableForSmartPricing(entry)
+    selectedItemIds.has(String(entry?.id))
+      && (onlyUnpriced ? isUnpricedQueueableForSmartPricing(entry) : isQueueableForSmartPricing(entry))
   ));
   if (itemsToQueue.length === 0) {
-    alert('No queueable items selected. Smart pricing supports magic, rare, and unique items.');
+    alert(
+      onlyUnpriced
+        ? 'No unpriced queueable items selected.'
+        : 'No queueable items selected. Smart pricing supports magic, rare, and unique items.'
+    );
     return;
   }
 
@@ -1925,7 +1982,7 @@ async function queueSelectedItemsForSmartPricing() {
     const league = getOperationalLeague(currentLeague || viewData.league);
     const result = await window.networthOverlayAPI.enqueuePricingItems(itemsToQueue, league);
     if (result?.queued > 0) {
-      console.log(`[PRICING] Queued ${result.queued} items for smart pricing`);
+      console.log(`[PRICING] Queued ${result.queued} ${onlyUnpriced ? 'unpriced ' : ''}items for smart pricing`);
       if (queueViewActive) {
         loadQueueView();
       }
@@ -2369,8 +2426,18 @@ function renderQueueCooldownStatus(taskQueueData) {
 
   const pricingText = pricingUntil > Date.now() ? `Pricing retry in ${formatQueueCooldown(pricingUntil)}` : '';
   const scanText = scanUntil > Date.now() ? `Next scan in ${formatQueueCooldown(scanUntil)}` : '';
-  const parts = [scanText, pricingText].filter(Boolean);
+  const pausedText = source?.pricingPaused === true ? 'Pricing paused' : '';
+  const parts = [pausedText, scanText, pricingText].filter(Boolean);
   el.textContent = parts.join(' | ');
+}
+
+function renderQueuePauseButton(taskQueueData = latestTaskQueueData) {
+  const btn = document.getElementById('queuePauseBtn');
+  if (!btn) return;
+  const source = taskQueueData && typeof taskQueueData === 'object' ? taskQueueData : {};
+  const paused = source?.pricingPaused === true;
+  btn.textContent = paused ? 'Resume' : 'Pause';
+  btn.title = paused ? 'Resume the pricing queue' : 'Pause the pricing queue';
 }
 
 async function loadQueueViewInternal({ silent = false } = {}) {
@@ -2392,10 +2459,12 @@ async function loadQueueViewInternal({ silent = false } = {}) {
     latestTaskQueueData = {
       pricing: Array.isArray(data?.pricing) ? data.pricing : [],
       scans: Array.isArray(data?.scans) ? data.scans : [],
+      pricingPaused: data?.pricingPaused === true,
     };
     applyPricingQueueStateToAllRuns();
     scanHistoryClearedAt = Number(data?.scanHistoryClearedAt || 0);
     renderQueueCooldownStatus(data);
+    renderQueuePauseButton(data);
     const pricing = Array.isArray(data?.pricing) ? data.pricing : [];
     const scans = Array.isArray(data?.scans) ? data.scans : [];
     const entries = [];
@@ -3025,6 +3094,7 @@ if (queueUnpricedNowAction) {
 }
 
 setQueueViewFilter(queueViewFilter);
+renderQueuePauseButton();
 
 const queueFilterActiveBtn = document.getElementById('queueFilterActiveBtn');
 if (queueFilterActiveBtn) {
@@ -3045,6 +3115,22 @@ if (queueFilterHistoryBtn) {
 const queueRefreshBtn = document.getElementById('queueRefreshBtn');
 if (queueRefreshBtn) {
   queueRefreshBtn.addEventListener('click', () => loadQueueView());
+}
+
+const queuePauseBtn = document.getElementById('queuePauseBtn');
+if (queuePauseBtn) {
+  queuePauseBtn.addEventListener('click', async () => {
+    try {
+      if (latestTaskQueueData?.pricingPaused === true) {
+        await window.networthOverlayAPI.resumePricingQueue();
+      } else {
+        await window.networthOverlayAPI.pausePricingQueue();
+      }
+      await loadQueueView();
+    } catch (error) {
+      console.warn('[NETWORTH-OVERLAY] Failed to toggle pricing queue pause:', error);
+    }
+  });
 }
 
 const queueClearBtn = document.getElementById('queueClearBtn');
@@ -3149,7 +3235,7 @@ document.querySelectorAll('.wealth-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.wealth-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    // In echte implementatie zou je hier de grafiek periode aanpassen
+    // In a full implementation this would update the graph period.
     updateChart();
   });
 });
@@ -3261,7 +3347,9 @@ setValueDisplayCurrency('chaos', { refresh: false });
       latestTaskQueueData = {
         pricing: Array.isArray(data?.pricing) ? data.pricing : [],
         scans: Array.isArray(data?.scans) ? data.scans : [],
+        pricingPaused: data?.pricingPaused === true,
       };
+      renderQueuePauseButton(data);
       const runPricingStateChanged = applyPricingQueueStateToAllRuns();
       const pricing = Array.isArray(data?.pricing) ? data.pricing : [];
       let maxTs = lastPricingUpdateTs;
@@ -3383,229 +3471,6 @@ function restoreTrackRunHistory() {
 }
 
 restoreTrackRunHistory();
-
-// Mock items voor pricing testing
-const MOCK_PRICING_ITEMS = {
-  rares: [
-    { id: 'mock_rare_1', name: 'Entropy Guardian', typeLine: 'Wyrmscale Doublet', baseType: 'Wyrmscale Doublet', category: 'Body Armour', frameType: 2, ilvl: 71, corrupted: false,
-      icon: 'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQXJtb3Vycy9Cb2R5QXJtb3Vycy9Cb2R5U3RyM0ludDMiLCJ3IjoyLCJoIjozLCJzY2FsZSI6MX1d/4f2ca10709/BodyStr3Int3.png',
-      explicitMods: ['+34 to Strength', '+225 to Armour', '+327 to Evasion Rating', '+157 to maximum Life', '+23% to Lightning Resistance'],
-      _networth: { value: 5, currency: 'chaos' },
-      _pricing: {
-        estimated: true,
-        chaos: 5,
-        divine: 0.025,
-        confidence: 'low',
-        sampleSize: 3,
-        range: { min: 3, max: 8 },
-        tradeUrl: 'https://www.pathofexile.com/trade/search/Mirage?q=' + encodeURIComponent(JSON.stringify({
-          query: {
-            status: { option: 'online' },
-            type: 'Wyrmscale Doublet',
-            stats: [{
-              type: 'and',
-              filters: [
-                { id: 'pseudo.pseudo_total_life', value: { min: 140 } },
-                { id: 'pseudo.pseudo_total_elemental_resistance', value: { min: 20 } }
-              ]
-            }],
-            filters: {
-              type_filters: { filters: { rarity: { option: 'rare' } } },
-              misc_filters: { filters: { ilvl: { min: 70 } } }
-            }
-          },
-          sort: { price: 'asc' }
-        })),
-        allMods: [
-          { text: '+34 to Strength', type: 'explicit', selected: false, range: { min: 34 } },
-          { text: '+225 to Armour', type: 'explicit', selected: false, range: { min: 225 } },
-          { text: '+327 to Evasion Rating', type: 'explicit', selected: false, range: { min: 327 } },
-          { text: '+157 to maximum Life', type: 'explicit', selected: true, range: { min: 140 } },
-          { text: '+23% to Lightning Resistance', type: 'explicit', selected: true, range: { min: 20 } }
-        ],
-        priceDetails: {
-          all: [
-            { amount: 3, currency: 'chaos', chaos: 3 },
-            { amount: 5, currency: 'chaos', chaos: 5 },
-            { amount: 8, currency: 'chaos', chaos: 8 }
-          ],
-          usedForAverage: [
-            { amount: 3, currency: 'chaos', chaos: 3 },
-            { amount: 5, currency: 'chaos', chaos: 5 },
-            { amount: 8, currency: 'chaos', chaos: 8 }
-          ]
-        }
-      } },
-    { id: 'mock_rare_2', name: 'Mind Guardian', typeLine: 'Legion Plate', baseType: 'Legion Plate', category: 'Body Armour', frameType: 2, ilvl: 82, corrupted: false,
-      icon: 'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQXJtb3Vycy9Cb2R5QXJtb3Vycy9Cb2R5U3RyOSIsInciOjIsImgiOjMsInNjYWxlIjoxfV0/ea82aa7c43/BodyStr9.png',
-      explicitMods: ['+85 to Armour', '79% increased Armour', '+203 to maximum Life', '+35% to Chaos Resistance'],
-      craftedMods: ['+12% to Fire and Chaos Resistances'],
-      _networth: { value: 16, currency: 'chaos' },
-      _pricing: {
-        estimated: true,
-        chaos: 16,
-        divine: 0.08,
-        confidence: 'high',
-        sampleSize: 10,
-        range: { min: 12, max: 22 },
-        tradeUrl: 'https://www.pathofexile.com/trade/search/Mirage?q=' + encodeURIComponent(JSON.stringify({
-          query: {
-            status: { option: 'online' },
-            type: 'Legion Plate',
-            stats: [{
-              type: 'and',
-              filters: [
-                { id: 'pseudo.pseudo_total_life', value: { min: 182 } },
-                { id: 'pseudo.pseudo_total_chaos_resistance', value: { min: 31 } }
-              ]
-            }],
-            filters: {
-              type_filters: { filters: { rarity: { option: 'rare' } } },
-              misc_filters: { filters: { ilvl: { min: 82 } } }
-            }
-          },
-          sort: { price: 'asc' }
-        })),
-        allMods: [
-          { text: '+85 to Armour', type: 'explicit', selected: false, range: { min: 85 } },
-          { text: '79% increased Armour', type: 'explicit', selected: false, range: { min: 79 } },
-          { text: '+203 to maximum Life', type: 'explicit', selected: true, range: { min: 182 } },
-          { text: '+35% to Chaos Resistance', type: 'explicit', selected: true, range: { min: 31 } },
-          { text: '+12% to Fire and Chaos Resistances', type: 'crafted', selected: false, range: { min: 12 } }
-        ],
-        priceDetails: {
-          all: [
-            { amount: 12, currency: 'chaos', chaos: 12 },
-            { amount: 14, currency: 'chaos', chaos: 14 },
-            { amount: 15, currency: 'chaos', chaos: 15 },
-            { amount: 16, currency: 'chaos', chaos: 16 },
-            { amount: 18, currency: 'chaos', chaos: 18 },
-            { amount: 20, currency: 'chaos', chaos: 20 },
-            { amount: 22, currency: 'chaos', chaos: 22 },
-            { amount: 25, currency: 'chaos', chaos: 25 },
-            { amount: 30, currency: 'chaos', chaos: 30 },
-            { amount: 35, currency: 'chaos', chaos: 35 }
-          ],
-          usedForAverage: [
-            { amount: 12, currency: 'chaos', chaos: 12 },
-            { amount: 14, currency: 'chaos', chaos: 14 },
-            { amount: 15, currency: 'chaos', chaos: 15 },
-            { amount: 16, currency: 'chaos', chaos: 16 },
-            { amount: 18, currency: 'chaos', chaos: 18 }
-          ]
-        }
-      } },
-    { id: 'mock_rare_3', name: 'Rune Coat', typeLine: 'Varnished Coat', baseType: 'Varnished Coat', category: 'Body Armour', frameType: 2, ilvl: 83, corrupted: false, fractured: true,
-      icon: 'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQXJtb3Vycy9Cb2R5QXJtb3Vycy9Cb2R5RGV4SW50NCIsInciOjIsImgiOjMsInNjYWxlIjoxfV0/9a74ae1c1f/BodyDexInt4.png',
-      implicitMods: ['Determination has 19% increased Aura Effect'],
-      fracturedMods: ['+1 to maximum number of Spectres'],
-      explicitMods: ['+164 to maximum Life', '+44 to maximum Mana', '+15% to Cold Resistance', '+29% to Chaos Resistance'],
-      influences: { searing: true, eater: true },
-      _networth: { value: 10, currency: 'chaos' },
-      _pricing: {
-        estimated: true,
-        chaos: 10,
-        divine: 0.05,
-        confidence: 'medium',
-        sampleSize: 4,
-        range: { min: 7, max: 15 },
-        tradeUrl: 'https://www.pathofexile.com/trade/search/Mirage?q=' + encodeURIComponent(JSON.stringify({
-          query: {
-            status: { option: 'online' },
-            type: 'Varnished Coat',
-            stats: [{
-              type: 'and',
-              filters: [
-                { id: 'implicit.stat_3653400807', value: { min: 19 } },
-                { id: 'fractured.stat_125218179', value: { min: 1 } },
-                { id: 'pseudo.pseudo_total_life', value: { min: 150 } }
-              ]
-            }],
-            filters: {
-              type_filters: { filters: { rarity: { option: 'rare' } } },
-              misc_filters: { filters: { ilvl: { min: 83 }, fractured_item: { option: 'true' } } }
-            }
-          },
-          sort: { price: 'asc' }
-        })),
-        allMods: [
-          { text: 'Determination has 19% increased Aura Effect', type: 'implicit', selected: true, range: { min: 19 } },
-          { text: '+1 to maximum number of Spectres', type: 'fractured', selected: true, range: {} },
-          { text: '+164 to maximum Life', type: 'explicit', selected: true, range: { min: 150 } },
-          { text: '+44 to maximum Mana', type: 'explicit', selected: false, range: { min: 44 } },
-          { text: '+15% to Cold Resistance', type: 'explicit', selected: false, range: { min: 15 } },
-          { text: '+29% to Chaos Resistance', type: 'explicit', selected: false, range: { min: 29 } }
-        ],
-        priceDetails: {
-          all: [
-            { amount: 7, currency: 'chaos', chaos: 7 },
-            { amount: 9, currency: 'chaos', chaos: 9 },
-            { amount: 11, currency: 'chaos', chaos: 11 },
-            { amount: 15, currency: 'chaos', chaos: 15 }
-          ],
-          usedForAverage: [
-            { amount: 7, currency: 'chaos', chaos: 7 },
-            { amount: 9, currency: 'chaos', chaos: 9 },
-            { amount: 11, currency: 'chaos', chaos: 11 },
-            { amount: 15, currency: 'chaos', chaos: 15 }
-          ]
-        }
-      } }
-  ],
-  uniques: [
-    { id: 'mock_unique_1', name: "Berek's Respite", typeLine: 'Two-Stone Ring', baseType: 'Two-Stone Ring', category: 'Ring', frameType: 3, ilvl: 83, corrupted: false, isFoulborn: true,
-      icon: 'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvUmluZ3MvVHdvU3RvbmVSaW5nIiwidyI6MSwiaCI6MSwic2NhbGUiOjF9XQ/6f0e047d08/TwoStoneRing.png',
-      implicitMods: ['+13% to Fire and Lightning Resistances'],
-      explicitMods: ["Ignited Enemies you Kill Explode, dealing 5% of their Life as Fire Damage which cannot Ignite", 'Adds 24 to 33 Fire Damage to Spells and Attacks', '28% increased Lightning Damage', '+34 to maximum Mana'],
-      foulbornMods: ["Shocked Enemies you Kill Explode, dealing 5% of their Life as Lightning Damage which cannot Shock"],
-      _networth: { value: 12000, currency: 'chaos' },
-      _pricing: {
-        estimated: true,
-        chaos: 12000,
-        divine: 60,
-        confidence: 'medium',
-        sampleSize: 2,
-        range: { min: 10000, max: 14000 },
-        tradeUrl: 'https://www.pathofexile.com/trade/search/Mirage?q=' + encodeURIComponent(JSON.stringify({
-          query: {
-            status: { option: 'online' },
-            name: "Berek's Respite",
-            type: 'Two-Stone Ring',
-            stats: [{
-              type: 'and',
-              filters: [
-                { id: 'explicit.stat_3141070085', disabled: false },
-                { id: 'explicit.stat_1334060246', value: { min: 24, max: 33 } }
-              ]
-            }],
-            filters: {
-              type_filters: { filters: { rarity: { option: 'unique' } } },
-              misc_filters: { filters: { ilvl: { min: 83 }, foulborn_item: { option: 'true' } } }
-            }
-          },
-          sort: { price: 'asc' }
-        })),
-        allMods: [
-          { text: '+13% to Fire and Lightning Resistances', type: 'implicit', selected: false, range: { min: 13 } },
-          { text: "Ignited Enemies you Kill Explode, dealing 5% of their Life as Fire Damage which cannot Ignite", type: 'explicit', selected: true, range: {} },
-          { text: 'Adds 24 to 33 Fire Damage to Spells and Attacks', type: 'explicit', selected: true, range: { min: 24, max: 33 } },
-          { text: '28% increased Lightning Damage', type: 'explicit', selected: true, range: { min: 28 } },
-          { text: '+34 to maximum Mana', type: 'explicit', selected: true, range: { min: 34 } },
-          { text: "Shocked Enemies you Kill Explode, dealing 5% of their Life as Lightning Damage which cannot Shock", type: 'foulborn', selected: true, range: {} }
-        ],
-        priceDetails: {
-          all: [
-            { amount: 50, currency: 'divine', chaos: 10000 },
-            { amount: 70, currency: 'divine', chaos: 14000 }
-          ],
-          usedForAverage: [
-            { amount: 50, currency: 'divine', chaos: 10000 },
-            { amount: 70, currency: 'divine', chaos: 14000 }
-          ]
-        }
-      } }
-  ]
-};
 
 function normalizeTrackRunTabIndices(values) {
   return Array.from(
