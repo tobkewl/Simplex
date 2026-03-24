@@ -135,11 +135,13 @@ const {
   autoDetectClientLogPath,
 } = createAppSupportService({
   app,
+  BrowserWindow,
   fs,
   os,
   path,
   fetch,
   autoUpdater,
+  dialog,
   getAuth,
   logger,
 });

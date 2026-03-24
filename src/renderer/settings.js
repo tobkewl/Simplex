@@ -1788,7 +1788,7 @@ async function loadAppInfo() {
   try {
     const appInfo = await window.settingsAPI.getAppInfo();
     if (appInfo) {
-      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.7';
+      if (appVersionEl) appVersionEl.textContent = appInfo.version || '1.0.8';
     }
     
     // Load log path
@@ -2334,5 +2334,6 @@ async function refreshStatus() {
 
 setInterval(refreshStatus, 1000);
 refreshStatus();
+
 
 
