@@ -61,6 +61,7 @@ let clientLogWatcher = null;
 // Auth & API
 let authService = null;
 let apiClient = null;
+let networthStateFlusher = null;
 let buildManagerWindow = null;
 let activeGuideState = null;
 const registeredShortcuts = {
@@ -688,6 +689,13 @@ registerAppLifecycleHandlers({
   globalShortcut,
   getSettings: () => settings,
   saveSettings,
+  flushDeferredState: () => {
+    try {
+      if (typeof networthStateFlusher === 'function') {
+        networthStateFlusher();
+      }
+    } catch {}
+  },
   setIsQuitting: (value) => {
     isQuitting = !!value;
   },
@@ -723,7 +731,7 @@ app.whenReady().then(async () => {
   authService = authContext.authService;
   apiClient = authContext.apiClient;
 
-  registerNetworthIpcHandlers({
+  const networthIpcRegistration = registerNetworthIpcHandlers({
     ipcMain,
     logger,
     getApiClient: () => apiClient,
@@ -731,6 +739,9 @@ app.whenReady().then(async () => {
     saveSettings,
     enableDevWebsiteFeatures: true,
   });
+  networthStateFlusher = typeof networthIpcRegistration?.flushState === 'function'
+    ? networthIpcRegistration.flushState
+    : null;
 
   registerPostAuthIpcHandlers({
     ipcMain,

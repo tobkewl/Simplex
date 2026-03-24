@@ -231,6 +231,7 @@ class AuthService {
       const message = String(error?.message || '')
       if (/invalid refresh token/i.test(message)) {
         console.warn('Stored session is no longer valid. Login is required.')
+        await this.applyTokens(null, 'SIGNED_OUT')
         return false
       }
       console.error('Failed to refresh session:', error)
@@ -295,7 +296,7 @@ class AuthService {
     this.notifyListeners(eventName, this.getSession())
   }
 
-  async fetchUserProfile() {
+  async fetchUserProfile({ allowRefresh = true } = {}) {
     if (!this.tokens?.accessToken || !this.baseUrl) return null
     try {
       const response = await fetch(`${this.baseUrl}/api/client/me`, {
@@ -303,6 +304,13 @@ class AuthService {
         headers: { Authorization: `Bearer ${this.tokens.accessToken}` },
       })
       if (!response.ok) {
+        if (response.status === 401 && allowRefresh) {
+          const refreshed = await this.refreshSession()
+          if (refreshed) {
+            return this.fetchUserProfile({ allowRefresh: false })
+          }
+          return null
+        }
         const body = await response.text().catch(() => '')
         console.warn('Failed to fetch user profile:', response.status, body)
         return null

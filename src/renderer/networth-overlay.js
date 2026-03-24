@@ -76,7 +76,7 @@ let lastPricingUpdateTs = 0;
 let queueViewLoading = false;
 let queueViewFilter = loadPersistedQueueViewFilter();
 let scanHistoryClearedAt = 0;
-let latestTaskQueueData = { pricing: [], scans: [], pricingPaused: false };
+let latestTaskQueueData = { pricing: [], pricingHistory: [], scans: [], pricingPaused: false };
 let valueDisplayCurrency = 'chaos';
 let availableCharacters = [];
 let availableStashTabs = [];
@@ -339,6 +339,91 @@ function getCdnFallbackUrl(itemName) {
   return cdnUrls[itemName] || '';
 }
 
+function resolveCurrencyIconPath(currencyLabel) {
+  const directKey = getCurrencyKeyFromItemName(currencyLabel);
+  if (directKey && CURRENCY_ICONS[directKey]) {
+    return {
+      iconPath: CURRENCY_ICONS[directKey],
+      fallbackPath: getCdnFallbackUrl(currencyLabel),
+    };
+  }
+
+  const lookup = buildRateLookupCandidates(currencyLabel);
+  for (const key of lookup) {
+    if (CURRENCY_ICONS[key]) {
+      return {
+        iconPath: CURRENCY_ICONS[key],
+        fallbackPath: getCdnFallbackUrl(currencyLabel),
+      };
+    }
+  }
+
+  const direct = MIRAGE_STACKABLE_CURRENCY_BY_NAME[currencyLabel];
+  if (direct?.iconUrl) {
+    return {
+      iconPath: direct.iconUrl,
+      fallbackPath: direct.iconUrl,
+    };
+  }
+
+  return {
+    iconPath: null,
+    fallbackPath: getCdnFallbackUrl(currencyLabel),
+  };
+}
+
+function getCurrencyDisplayNameFromKey(currencyKey) {
+  const key = String(currencyKey || '').trim().toLowerCase();
+  const builtin = {
+    chaos: 'Chaos Orb',
+    divine: 'Divine Orb',
+    exalted: 'Exalted Orb',
+    mirror: 'Mirror of Kalandra',
+    alchemy: 'Orb of Alchemy',
+    alteration: 'Orb of Alteration',
+    chromatic: 'Chromatic Orb',
+    jewellers: "Jeweller's Orb",
+    fusing: 'Orb of Fusing',
+    vaal: 'Vaal Orb',
+    regal: 'Regal Orb',
+    regret: 'Orb of Regret',
+    scour: 'Orb of Scouring',
+    blessed: 'Blessed Orb',
+    gcp: "Gemcutter's Prism",
+    chance: 'Orb of Chance',
+    transmute: 'Orb of Transmutation',
+    wisdom: 'Scroll of Wisdom',
+    portal: 'Portal Scroll',
+    rogues_marker: "Rogue's Marker",
+    'rogues-marker': "Rogue's Marker",
+  };
+  if (builtin[key]) return builtin[key];
+  if (MIRAGE_STACKABLE_CURRENCY_BY_KEY[key]?.name) return MIRAGE_STACKABLE_CURRENCY_BY_KEY[key].name;
+  return '';
+}
+
+function getBreakdownCurrencyDescriptor(item) {
+  const itemName = getItemDisplayName(item);
+  const itemCurrency = String(item?._networth?.currency || 'chaos');
+  const itemNameKey = getCurrencyKeyFromItemName(itemName);
+  const currencyCandidates = buildRateLookupCandidates(itemCurrency);
+  const canonicalKey =
+    itemNameKey ||
+    currencyCandidates[0] ||
+    normalizeMirageStackableCurrencyKey(itemCurrency) ||
+    normalizeRateLookupKey(itemCurrency) ||
+    'chaos';
+  const displayName =
+    (itemNameKey ? itemName : '') ||
+    getCurrencyDisplayNameFromKey(canonicalKey) ||
+    itemCurrency;
+
+  return {
+    canonicalKey,
+    displayName,
+  };
+}
+
 // Get icon HTML for an item
 function getItemIconHtml(item) {
   if (!item) return '?';
@@ -364,6 +449,40 @@ function getItemIconHtml(item) {
   const itemIconPath = `../assets/items/${safeName}.png`;
   const cdnFallback = getCdnFallbackUrl(itemName);
   return `<img src="${escapeHtml(itemIconPath)}" alt="${escapeHtml(itemName)}" onerror="this.onerror=null; this.src='${escapeHtml(cdnFallback)}'; this.onerror=function(){this.parentElement.innerHTML='?';}">`;
+}
+
+function findRepresentativeItemForCurrency(items, currencyLabel) {
+  const source = Array.isArray(items) ? items : [];
+  if (source.length === 0) return null;
+
+  const targetCandidates = new Set(buildRateLookupCandidates(currencyLabel));
+  const directKey = getCurrencyKeyFromItemName(currencyLabel);
+  if (directKey) targetCandidates.add(directKey);
+  const normalizedTarget = normalizeRateLookupKey(currencyLabel);
+
+  for (const item of source) {
+    const itemName = getItemDisplayName(item);
+    const itemNameKey = getCurrencyKeyFromItemName(itemName);
+    if (itemNameKey && targetCandidates.has(itemNameKey)) {
+      return item;
+    }
+
+    const itemCurrency = String(item?._networth?.currency || '');
+    for (const candidate of buildRateLookupCandidates(itemCurrency)) {
+      if (targetCandidates.has(candidate)) {
+        return item;
+      }
+    }
+
+    if (normalizeRateLookupKey(itemName) === normalizedTarget) {
+      return item;
+    }
+    if (normalizeRateLookupKey(itemCurrency) === normalizedTarget) {
+      return item;
+    }
+  }
+
+  return null;
 }
 
 function getItemDisplayName(item) {
@@ -422,7 +541,56 @@ function buildItemTooltip(item) {
 
   const name = getItemDisplayName(item);
   const type = item.typeLine || item.baseType || '';
-  const rarity = rarityMap[item.frameType] || 'Item';
+  const frameType = Number(item?.frameType ?? item?.frame_type);
+  const rarity = rarityMap[frameType] || 'Item';
+
+  const tooltipRawValue = Number(item?._networth?.value);
+  const tooltipCurrency = String(item?._networth?.currency || 'chaos').toLowerCase();
+  const tooltipRate = getCurrencyRate(tooltipCurrency);
+  const tooltipChaosValue = Number.isFinite(tooltipRawValue) && Number.isFinite(tooltipRate)
+    ? tooltipRawValue * tooltipRate
+    : null;
+  const valueLine = tooltipChaosValue !== null
+    ? `<div class="tt-row tt-value">Value: <span class="tt-muted">${escapeHtml(formatDisplayValueFromChaos(tooltipChaosValue))}</span></div>`
+    : '';
+  const tabLine = item._tabName ? `<div class="tt-row tt-tab">Tab: <span class="tt-muted">${escapeHtml(item._tabName)}</span></div>` : '';
+  const noteLine = item.note ? `<div class="tt-row tt-note">${escapeHtml(item.note)}</div>` : '';
+  const stackParts = [];
+  const stackSize = Number.isFinite(Number(item?.stackSize)) ? Number(item.stackSize) : null;
+  const maxStackSize = Number.isFinite(Number(item?.maxStackSize)) ? Number(item.maxStackSize) : null;
+  if (stackSize !== null) {
+    stackParts.push(maxStackSize && maxStackSize > 0 ? `${stackSize}/${maxStackSize}` : String(stackSize));
+  }
+  const itemLevel = item.ilvl || item.itemLevel || null;
+  if (itemLevel) {
+    stackParts.push(`Item Level ${itemLevel}`);
+  }
+  const stackMetaLine = stackParts.length
+    ? `<div class="tt-row">Stack: <span class="tt-muted">${escapeHtml(stackParts.join(' | '))}</span></div>`
+    : '';
+  const cardFlavorLines = []
+    .concat(Array.isArray(item?.flavourText) ? item.flavourText : [])
+    .concat(typeof item?.descrText === 'string' && item.descrText.trim() ? [item.descrText.trim()] : []);
+  const cardFlavorBlock = cardFlavorLines.length
+    ? `<div class="tt-section-title">Text</div><div class="tt-mods">${cardFlavorLines.map((line) => `<div>${escapeHtml(String(line))}</div>`).join('')}</div>`
+    : '';
+
+  if (frameType === 6) {
+    return `
+      <div class="tt-header">
+        <div class="tt-name">${escapeHtml(name)}</div>
+        ${type && type !== name ? `<div class="tt-type">${escapeHtml(type)}</div>` : ''}
+        <div class="tt-rarity">${escapeHtml(rarity)}</div>
+      </div>
+      <div class="tt-body">
+        ${stackMetaLine}
+        ${valueLine}
+        ${tabLine}
+        ${cardFlavorBlock}
+        ${noteLine}
+      </div>
+    `;
+  }
 
   const phys = getPropertyValue(item, 'Physical Damage');
   const elem = getPropertyValue(item, 'Elemental Damage');
@@ -430,7 +598,6 @@ function buildItemTooltip(item) {
   const crit = getPropertyValue(item, 'Critical Strike Chance');
   const aps = getPropertyValue(item, 'Attacks per Second');
   const quality = getPropertyValue(item, 'Quality') || (item.quality ? `+${item.quality}%` : null);
-  const itemLevel = item.ilvl || item.itemLevel || null;
   const reqs = getPropertyValue(item, 'Requirements');
   const armourVal = getPropertyValue(item, 'Armour');
   const evasionVal = getPropertyValue(item, 'Evasion Rating');
@@ -504,19 +671,6 @@ function buildItemTooltip(item) {
     ${addMods('Pseudo', item.pseudoMods)}
   `;
 
-  const tooltipRawValue = Number(item?._networth?.value);
-  const tooltipCurrency = String(item?._networth?.currency || 'chaos').toLowerCase();
-  const tooltipRate = getCurrencyRate(tooltipCurrency);
-  const tooltipChaosValue = Number.isFinite(tooltipRawValue) && Number.isFinite(tooltipRate)
-    ? tooltipRawValue * tooltipRate
-    : null;
-  const valueLine = tooltipChaosValue !== null
-    ? `<div class="tt-row tt-value">Value: <span class="tt-muted">${escapeHtml(formatDisplayValueFromChaos(tooltipChaosValue))}</span></div>`
-    : '';
-
-  const tabLine = item._tabName ? `<div class="tt-row tt-tab">Tab: <span class="tt-muted">${escapeHtml(item._tabName)}</span></div>` : '';
-  const noteLine = item.note ? `<div class="tt-row tt-note">${escapeHtml(item.note)}</div>` : '';
-
   return `
     <div class="tt-header">
       <div class="tt-name">${escapeHtml(name)}</div>
@@ -551,6 +705,10 @@ function showHoverTooltip(text, event) {
   el.innerHTML = text;
   el.style.display = 'block';
   positionHoverTooltip(event);
+}
+
+function shouldShowHoverTooltip(event) {
+  return event?.ctrlKey === true;
 }
 
 function hideHoverTooltip() {
@@ -792,7 +950,7 @@ function updateWealth() {
     : (Number(converted.divine || 0) * getDivineRate());
   document.getElementById('wealthTotal').textContent = formatDisplayValueFromChaos(totalChaos);
   
-  // Update delta als comparison beschikbaar is
+  // Update delta when comparison data is available
   const deltaEl = document.getElementById('wealthDelta');
   if (!hasScopedFilter && lastComparison && lastComparison.hasPrevious) {
     const deltaChaos = lastComparison.delta?.chaos || 0;
@@ -807,62 +965,94 @@ function updateWealth() {
 // Update breakdown
 function updateBreakdown() {
   const container = document.getElementById('breakdownList');
+  if (!container) return;
   container.innerHTML = '';
 
   const scopedViewData = buildScopedViewData(getViewData());
-  if (!scopedViewData || !scopedViewData.netWorth) {
+  if (!scopedViewData) {
     container.innerHTML = '<div class="breakdown-item">No data</div>';
     return;
   }
 
-  const netWorth = scopedViewData.netWorth;
   const converted = scopedViewData.converted || { chaos: 0, divine: 0 };
   const totalChaos = Number.isFinite(Number(converted.chaos))
     ? Number(converted.chaos)
     : (Number(converted.divine || 0) * getDivineRate());
-  
-  // Sorteer currencies op waarde (hoogste eerst)
-  const currencies = Object.keys(netWorth)
-    .map(currency => ({
-      currency,
-      value: netWorth[currency],
-      icon: CURRENCY_ICONS[currency.toLowerCase()] || null
-    }))
-    .filter(c => c.value > 0)
-    .sort((a, b) => {
-      // Converteer naar chaos voor vergelijking
-      const rateA = getCurrencyRate(a.currency);
-      const rateB = getCurrencyRate(b.currency);
-      return (b.value * rateB) - (a.value * rateA);
-    });
-  
-  for (const curr of currencies.slice(0, 15)) { // Top 15 currencies
+  const scopedItems = Array.isArray(scopedViewData.items) ? scopedViewData.items : [];
+
+  const entries = buildBreakdownEntriesFromItems(scopedItems);
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="breakdown-item">No data</div>';
+    return;
+  }
+
+  for (const entry of entries.slice(0, 15)) {
     const item = document.createElement('div');
     item.className = 'breakdown-item';
-    
-    const chaosValue = curr.value * getCurrencyRate(curr.currency);
-    
+
     let valueText = '';
     if (breakdownView === 'divines') {
-      valueText = formatDisplayValueFromChaos(chaosValue);
+      valueText = formatDisplayValueFromChaos(entry.chaosValue);
     } else {
-      const percentage = totalChaos > 0 ? ((chaosValue / totalChaos) * 100).toFixed(1) : 0;
+      const percentage = totalChaos > 0 ? ((entry.chaosValue / totalChaos) * 100).toFixed(1) : 0;
       valueText = `${percentage}%`;
     }
-    
-    const iconPath = CURRENCY_ICONS[curr.currency.toLowerCase()] || null;
-    const iconHtml = iconPath 
-      ? `<img src="${escapeHtml(iconPath)}" alt="${escapeHtml(curr.currency)}" onerror="this.onerror=null; this.src='https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxSYXJlIiwic2NhbGUiOjF9XQ/46a2347805/CurrencyRerollRare.png'">`
+
+    const iconHtml = entry.representativeItem
+      ? getItemIconHtml(entry.representativeItem)
       : '<div style="width: 24px; height: 24px; background: rgba(139,104,56,0.3); border-radius: 3px;"></div>';
-    
+
     item.innerHTML = `
       <div class="breakdown-icon">${iconHtml}</div>
-      <div class="breakdown-name">${escapeHtml(curr.currency)}</div>
+      <div class="breakdown-name">${escapeHtml(entry.label)}</div>
       <div class="breakdown-value">${valueText}</div>
     `;
-    
+
     container.appendChild(item);
   }
+}
+
+function buildBreakdownEntriesFromItems(items) {
+  const source = Array.isArray(items) ? items : [];
+  const buckets = new Map();
+
+  for (const item of source) {
+    const amount = Number(item?._networth?.value);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const currency = item?._networth?.currency || 'chaos';
+    const rate = Number(getCurrencyRate(currency) || 0);
+    if (!Number.isFinite(rate) || rate <= 0) continue;
+
+    const quantity = Math.max(1, Number(item?.stackSize || 1));
+    const sign = Number(item?._deltaSign) < 0 ? -1 : 1;
+    const label = getItemDisplayName(item);
+    const key = label;
+    const chaosValue = amount * rate * sign;
+
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        key,
+        label,
+        chaosValue: 0,
+        quantity: 0,
+        representativeItem: item,
+      });
+    }
+
+    const entry = buckets.get(key);
+    entry.chaosValue += chaosValue;
+    entry.quantity += quantity * sign;
+  }
+
+  return Array.from(buckets.values())
+    .filter((entry) => Number.isFinite(entry.chaosValue) && entry.chaosValue > 0)
+    .sort((left, right) => {
+      if (left.chaosValue !== right.chaosValue) {
+        return right.chaosValue - left.chaosValue;
+      }
+      return String(left.label || '').localeCompare(String(right.label || ''));
+    });
 }
 
 function normalizeRateLookupKey(value) {
@@ -1601,8 +1791,22 @@ function updateItemsTable() {
     `;
 
     if (tooltip) {
-      row.addEventListener('mouseenter', (e) => showHoverTooltip(tooltip, e));
-      row.addEventListener('mousemove', positionHoverTooltip);
+      row.addEventListener('mouseenter', (e) => {
+        if (shouldShowHoverTooltip(e)) {
+          showHoverTooltip(tooltip, e);
+        }
+      });
+      row.addEventListener('mousemove', (e) => {
+        if (!shouldShowHoverTooltip(e)) {
+          hideHoverTooltip();
+          return;
+        }
+        if (!hoverTooltipEl || hoverTooltipEl.style.display === 'none') {
+          showHoverTooltip(tooltip, e);
+          return;
+        }
+        positionHoverTooltip(e);
+      });
       row.addEventListener('mouseleave', hideHoverTooltip);
     }
 
@@ -2351,12 +2555,7 @@ function isSameLocalDay(rawTs, referenceTs = Date.now()) {
 }
 
 function shouldKeepInActiveQueue(entry) {
-  if (!entry || typeof entry !== 'object') return false;
-  if (entry.kind !== 'pricing') return false;
-  const status = String(entry.status || '').toLowerCase();
-  if (status !== 'done') return false;
-  if (entry.hasPrice !== true) return false;
-  return isSameLocalDay(entry.updatedAt || entry.createdAt);
+  return false;
 }
 
 function isHistoryQueueEntry(entry) {
@@ -2458,6 +2657,7 @@ async function loadQueueViewInternal({ silent = false } = {}) {
     const data = await window.networthOverlayAPI.getTaskQueue();
     latestTaskQueueData = {
       pricing: Array.isArray(data?.pricing) ? data.pricing : [],
+      pricingHistory: Array.isArray(data?.pricingHistory) ? data.pricingHistory : [],
       scans: Array.isArray(data?.scans) ? data.scans : [],
       pricingPaused: data?.pricingPaused === true,
     };
@@ -2466,11 +2666,15 @@ async function loadQueueViewInternal({ silent = false } = {}) {
     renderQueueCooldownStatus(data);
     renderQueuePauseButton(data);
     const pricing = Array.isArray(data?.pricing) ? data.pricing : [];
+    const pricingHistory = Array.isArray(data?.pricingHistory) ? data.pricingHistory : [];
     const scans = Array.isArray(data?.scans) ? data.scans : [];
     const entries = [];
     let latestPricingDoneTs = lastPricingUpdateTs;
 
-    pricing.forEach(entry => entries.push({ ...entry, kind: 'pricing' }));
+    pricing
+      .filter((entry) => !isHistoryQueueEntry(entry))
+      .forEach(entry => entries.push({ ...entry, kind: 'pricing' }));
+    pricingHistory.forEach(entry => entries.push({ ...entry, kind: 'pricing', isHistory: true }));
     scans.forEach(entry => entries.push({ ...entry, kind: 'scan' }));
     const hasRealPerTabScanEntries = scans.some((entry) => String(entry?.type || '').toLowerCase() === 'tab_scan');
     const derivedScanEntries = hasRealPerTabScanEntries ? [] : getDerivedPendingScanQueueEntries();
@@ -2541,7 +2745,9 @@ async function loadQueueViewInternal({ silent = false } = {}) {
       if (entry.status === 'failed') tr.classList.add('failed');
       if (entry.status === 'done') tr.classList.add('done');
       if (entry.lastError) {
-        tr.title = `Last error: ${entry.lastError}`;
+        tr.title = entry.resultKind === 'no_results'
+          ? `No comparable listings found: ${entry.lastError}`
+          : `Last error: ${entry.lastError}`;
       }
 
       const typeLabel = (() => {
@@ -2564,6 +2770,7 @@ async function loadQueueViewInternal({ silent = false } = {}) {
       })();
       const name = entry.name || entry.itemKey || entry.id || 'Unknown';
       const status = String(entry.status || 'pending').toLowerCase();
+      const resultKind = String(entry.resultKind || '').toLowerCase();
       const statusKey = (() => {
         if (status === 'done') return 'done';
         if (status === 'failed') return 'failed';
@@ -2575,8 +2782,10 @@ async function loadQueueViewInternal({ silent = false } = {}) {
         const retryAt = Number(entry.retryAt || 0);
         if (retryAt > Date.now()) return `Rate limited - retry in ${formatQueueCooldown(retryAt)}`;
         if (statusKey === 'in_progress') return 'In progress';
+        if (entry.kind === 'pricing' && statusKey === 'done' && resultKind === 'no_results') return 'No listings found';
         if (statusKey === 'done') return 'Done';
         if (statusKey === 'failed') return 'Failed';
+        if (entry.kind === 'scan' && entry.lastError) return 'Waiting to retry';
         return status === 'queued' ? 'Queued' : 'Pending';
       })();
       const resultText = (() => {
@@ -2590,6 +2799,9 @@ async function loadQueueViewInternal({ silent = false } = {}) {
             return formatDisplayValueFromChaos(chaos);
           }
         }
+        if (entry.kind === 'pricing' && status === 'done' && resultKind === 'no_results') {
+          return 'No listings found';
+        }
         if (entry.kind === 'scan' && entry.type === 'tab_smart_price') {
           const queuedItems = Number(entry.queuedItems || 0);
           if (queuedItems > 0) {
@@ -2598,6 +2810,9 @@ async function loadQueueViewInternal({ silent = false } = {}) {
         }
         if (entry.kind === 'scan' && status === 'done') {
           return 'Done';
+        }
+        if (entry.kind === 'scan' && statusKey !== 'failed') {
+          return status === 'queued' ? 'Queued' : 'Pending';
         }
         if (entry.lastError) return 'Failed';
         return '-';
@@ -2641,8 +2856,12 @@ async function loadQueueViewInternal({ silent = false } = {}) {
       removeBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (entry.kind === 'pricing' && entry.itemKey) {
+          if (entry.isHistory === true && entry.id && window.networthOverlayAPI?.removePricingHistoryItem) {
+            await window.networthOverlayAPI.removePricingHistoryItem(entry.id);
+          } else {
             await window.networthOverlayAPI.removePricingQueueItem(entry.itemKey);
-          } else if (entry.kind === 'scan' && entry.id) {
+          }
+        } else if (entry.kind === 'scan' && entry.id) {
           await window.networthOverlayAPI.removeScanQueueItem(entry.id);
         }
         await loadQueueView();
@@ -2694,6 +2913,7 @@ async function clearEntireQueue({ includeHistory = false } = {}) {
     await window.networthOverlayAPI.clearPricingQueue();
     await window.networthOverlayAPI.clearScanQueue();
     if (includeHistory) {
+      await window.networthOverlayAPI.clearPricingHistory();
       await window.networthOverlayAPI.clearScanHistory();
       scanHistory = [];
       scanHistoryClearedAt = Date.now();
@@ -2718,23 +2938,41 @@ async function loadScanHistory() {
 function updateChart() {
   const canvas = document.getElementById('netWorthChart');
   const ctx = canvas.getContext('2d');
+
+  const canvasWidth = Math.max(1, Math.floor(canvas.clientWidth || canvas.offsetWidth || 0));
+  const canvasHeight = Math.max(1, Math.floor(canvas.clientHeight || canvas.offsetHeight || 0));
+  const devicePixelRatio = Math.max(1, Number(window.devicePixelRatio || 1));
+
+  canvas.width = Math.round(canvasWidth * devicePixelRatio);
+  canvas.height = Math.round(canvasHeight * devicePixelRatio);
+  canvas.style.width = `${canvasWidth}px`;
+  canvas.style.height = `${canvasHeight}px`;
+
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
   
-  canvas.width = canvas.offsetWidth;
-  canvas.height = canvas.offsetHeight;
-  
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
-  if (scanHistory.length === 0) {
+  const orderedScans = Array.isArray(scanHistory)
+    ? scanHistory
+      .slice()
+      .sort((left, right) => {
+        const leftTs = Number(left?.timestamp || 0);
+        const rightTs = Number(right?.timestamp || 0);
+        return leftTs - rightTs;
+      })
+    : [];
+
+  if (orderedScans.length === 0) {
     ctx.fillStyle = '#888';
     ctx.font = '14px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('No scan history yet', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('No scan history yet', canvasWidth / 2, canvasHeight / 2);
     return;
   }
 
   const searchTerm = getActiveSearchTerm();
   const scopedTabIndex = Number.isFinite(selectedTabIndex) ? selectedTabIndex : null;
-  const values = scanHistory.map((scan) => {
+  const hasScopedFilter = scopedTabIndex !== null || Boolean(searchTerm);
+  const values = orderedScans.map((scan) => {
     if (!scan || typeof scan !== 'object') return 0;
 
     if (scopedTabIndex !== null && !searchTerm && Array.isArray(scan.tabDetails)) {
@@ -2751,6 +2989,9 @@ function updateChart() {
 
     const items = getItemsForScan(scan);
     if (!items.length) {
+      if (hasScopedFilter) {
+        return 0;
+      }
       const converted = scan.converted || { chaos: 0, divine: 0 };
       return Number.isFinite(Number(converted.chaos))
         ? Number(converted.chaos)
@@ -2761,35 +3002,53 @@ function updateChart() {
       tabIndex: scopedTabIndex,
       searchTerm,
     });
+    if (hasScopedFilter && !scopedItems.length) {
+      return 0;
+    }
     const totals = buildTotalsFromItems(scopedItems);
     return Number(totals?.converted?.chaos || 0);
   });
   
   const maxValue = Math.max(...values, 1);
   const minValue = Math.min(...values, 0);
-  const range = maxValue - minValue || 1;
+  let displayMaxValue = maxValue;
+  if (values.length >= 3) {
+    const sortedDescending = values
+      .filter((value) => Number.isFinite(value))
+      .slice()
+      .sort((left, right) => right - left);
+    const highest = Number(sortedDescending[0] || 0);
+    const secondHighest = Number(sortedDescending[1] || 0);
+    if (highest > 0 && secondHighest > 0 && highest >= secondHighest * 4) {
+      displayMaxValue = Math.max(secondHighest * 1.15, 1);
+    }
+  }
+  const range = displayMaxValue - minValue || 1;
   
-  const padding = 30;
-  const chartWidth = canvas.width - padding * 2;
-  const chartHeight = canvas.height - padding * 2;
+  const paddingLeft = 62;
+  const paddingRight = 22;
+  const paddingTop = 16;
+  const paddingBottom = 34;
+  const chartWidth = canvasWidth - paddingLeft - paddingRight;
+  const chartHeight = canvasHeight - paddingTop - paddingBottom;
   
   // Draw grid
   ctx.strokeStyle = 'rgba(139, 104, 56, 0.2)';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 5; i++) {
-    const y = padding + (chartHeight / 5) * i;
+    const y = paddingTop + (chartHeight / 5) * i;
     ctx.beginPath();
-    ctx.moveTo(padding, y);
-    ctx.lineTo(canvas.width - padding, y);
+    ctx.moveTo(paddingLeft, y);
+    ctx.lineTo(canvasWidth - paddingRight, y);
     ctx.stroke();
     
     // Labels
-    const value = maxValue - (range / 5) * i;
-    ctx.fillStyle = '#666';
-    ctx.font = '10px sans-serif';
+    const value = displayMaxValue - (range / 5) * i;
+    ctx.fillStyle = '#b8b0a2';
+    ctx.font = '11px sans-serif';
     ctx.textAlign = 'right';
     const labelValue = formatDisplayValueFromChaos(value);
-    ctx.fillText(labelValue, padding - 8, y + 3);
+    ctx.fillText(labelValue, paddingLeft - 10, y + 4);
   }
   
   // Draw line
@@ -2800,9 +3059,10 @@ function updateChart() {
   
   for (let i = 0; i < values.length; i++) {
     const x = singlePoint
-      ? padding + (chartWidth / 2)
-      : padding + (chartWidth / (values.length - 1)) * i;
-    const y = padding + chartHeight - ((values[i] - minValue) / range) * chartHeight;
+      ? paddingLeft + (chartWidth / 2)
+      : paddingLeft + (chartWidth / (values.length - 1)) * i;
+    const normalizedValue = Math.min(values[i], displayMaxValue);
+    const y = paddingTop + chartHeight - ((normalizedValue - minValue) / range) * chartHeight;
     
     if (i === 0) {
       ctx.moveTo(x, y);
@@ -2816,18 +3076,19 @@ function updateChart() {
   ctx.fillStyle = 'rgba(74, 144, 226, 0.9)';
   for (let i = 0; i < values.length; i++) {
     const x = singlePoint
-      ? padding + (chartWidth / 2)
-      : padding + (chartWidth / (values.length - 1)) * i;
-    const y = padding + chartHeight - ((values[i] - minValue) / range) * chartHeight;
+      ? paddingLeft + (chartWidth / 2)
+      : paddingLeft + (chartWidth / (values.length - 1)) * i;
+    const normalizedValue = Math.min(values[i], displayMaxValue);
+    const y = paddingTop + chartHeight - ((normalizedValue - minValue) / range) * chartHeight;
     
     ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
     ctx.fill();
   }
   
   // X-axis labels
-  ctx.fillStyle = '#666';
-  ctx.font = '9px sans-serif';
+  ctx.fillStyle = '#9d9486';
+  ctx.font = '10px sans-serif';
   ctx.textAlign = 'center';
   const step = Math.max(1, Math.floor(values.length / 5));
   const formatHistoryLabel = (timestamp) => {
@@ -2839,12 +3100,12 @@ function updateChart() {
   };
   for (let i = 0; i < values.length; i += step) {
     const x = singlePoint
-      ? padding + (chartWidth / 2)
-      : padding + (chartWidth / (values.length - 1)) * i;
-    const time = formatHistoryLabel(scanHistory[i].timestamp);
-    ctx.fillText(time, x, canvas.height - padding + 15);
+      ? paddingLeft + (chartWidth / 2)
+      : paddingLeft + (chartWidth / (values.length - 1)) * i;
+      const time = formatHistoryLabel(orderedScans[i].timestamp);
+      ctx.fillText(time, x, canvasHeight - paddingBottom + 18);
+    }
   }
-}
 
 // Scan stashes
 async function scanStashes(selectedOnly = false, options = {}) {
@@ -2876,17 +3137,16 @@ async function scanStashes(selectedOnly = false, options = {}) {
   if (scanInFlight) {
     return false;
   }
-  scanInFlight = true;
 
   const primaryBtn = document.getElementById('scanAllBtn') || document.getElementById('syncTabsBtn');
   const dropdownBtn = document.getElementById('scanMenuToggle') || document.getElementById('syncDropdownBtn');
-  if (!resumeMode && primaryBtn) primaryBtn.disabled = true;
-  if (!resumeMode && dropdownBtn) dropdownBtn.disabled = true;
   const prevPrimaryText = primaryBtn ? primaryBtn.textContent : '';
-  if (!resumeMode && primaryBtn) primaryBtn.textContent = 'Syncing...';
 
   try {
     const stashTabsOnly = (lastScan?.tabDetails || []).filter(tab => tab.source !== 'character');
+    const allStashTabIndices = stashTabsOnly
+      .map((tab) => Number.parseInt(String(tab.index), 10))
+      .filter((index) => Number.isFinite(index));
     if (selectedOnly && explicitTabIndices.length === 0 && scanTabSelection.size === 0) {
       if (!silent && !Number.isFinite(selectedTabIndex)) {
         await showAlertModal('No tabs selected', 'You need to select tabs first.');
@@ -2909,19 +3169,31 @@ async function scanStashes(selectedOnly = false, options = {}) {
         return false;
       }
     } else {
-      selectedTabIndices =
-        scanTabSelection.size > 0 && scanTabSelection.size < stashTabsOnly.length
-          ? selectedIndices
-          : null;
+      selectedTabIndices = null;
     }
 
-    const shouldProceed = await confirmLargeTabScanIfNeeded(selectedTabIndices, {
+    const isScanAll = !selectedOnly && explicitTabIndices.length === 0 && selectedTabIndices === null;
+    const requestedTabIndices = selectedTabIndices || allStashTabIndices;
+    const largeScanResponse = await confirmLargeTabScanIfNeeded(requestedTabIndices, {
       silent,
       resumeMode,
+      scanAllMode: isScanAll,
     });
-    if (!shouldProceed) {
+    if (!largeScanResponse.confirmed) {
       return false;
     }
+
+    if (isScanAll) {
+      const splitTabs = splitLargeScanTabs(allStashTabIndices);
+      selectedTabIndices = largeScanResponse.includeLargeTabsAtEnd === true
+        ? [...splitTabs.regular, ...splitTabs.large].map((tab) => Number.parseInt(String(tab.index), 10))
+        : splitTabs.regular.map((tab) => Number.parseInt(String(tab.index), 10));
+    }
+
+    scanInFlight = true;
+    if (!resumeMode && primaryBtn) primaryBtn.disabled = true;
+    if (!resumeMode && dropdownBtn) dropdownBtn.disabled = true;
+    if (!resumeMode && primaryBtn) primaryBtn.textContent = 'Syncing...';
 
     const selectedLeague = leagues.find((entry) => entry.id === currentLeague);
     const result = await window.networthOverlayAPI.scanStashes({
@@ -3006,13 +3278,8 @@ if (displayDivineBtn) {
 const syncTabsBtn = document.getElementById('syncTabsBtn') || document.getElementById('scanAllBtn');
 if (syncTabsBtn) {
   syncTabsBtn.addEventListener('click', async () => {
-    const activeTabIndex = Number.isFinite(selectedTabIndex) ? selectedTabIndex : null;
-    if (activeTabIndex === null) {
-      await showAlertModal('No tab selected', 'Select one stash tab first.');
-      return;
-    }
     closeScanMenu();
-    scanStashes(true, { tabIndices: [activeTabIndex] });
+    scanStashes(false);
   });
 }
 
@@ -3046,6 +3313,12 @@ document.addEventListener('click', (e) => {
   if (!menu || !toggle) return;
   if (!menu.contains(e.target) && !toggle.contains(e.target)) {
     closeScanMenu();
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Control') {
+    hideHoverTooltip();
   }
 });
 
@@ -3346,10 +3619,12 @@ setValueDisplayCurrency('chaos', { refresh: false });
       const data = await window.networthOverlayAPI.getTaskQueue();
       latestTaskQueueData = {
         pricing: Array.isArray(data?.pricing) ? data.pricing : [],
+        pricingHistory: Array.isArray(data?.pricingHistory) ? data.pricingHistory : [],
         scans: Array.isArray(data?.scans) ? data.scans : [],
         pricingPaused: data?.pricingPaused === true,
       };
       renderQueuePauseButton(data);
+      const stashPricingStateChanged = applyPricingQueueStateToAllScans();
       const runPricingStateChanged = applyPricingQueueStateToAllRuns();
       const pricing = Array.isArray(data?.pricing) ? data.pricing : [];
       let maxTs = lastPricingUpdateTs;
@@ -3366,10 +3641,15 @@ setValueDisplayCurrency('chaos', { refresh: false });
         const scanData = await window.networthOverlayAPI.getLastScan(currentLeague);
         if (scanData) {
           lastScan = scanData;
+          applyPricingQueueStateToAllScans();
           updateAll();
         }
-      } else if (activeViewTab !== 'networth' && runPricingStateChanged) {
-        updateItemsTable();
+      } else if (stashPricingStateChanged || runPricingStateChanged) {
+        if (activeViewTab === 'networth') {
+          updateAll();
+        } else {
+          updateItemsTable();
+        }
       }
     } catch (err) {
       // ignore polling errors
@@ -3641,6 +3921,77 @@ function getLatestPricingEntriesByItemKey() {
     map.set(itemKey, entry);
   });
   return map;
+}
+
+function applyQueuePricingEntryToItem(item, queueEntry) {
+  if (!item || typeof item !== 'object' || !queueEntry || typeof queueEntry !== 'object') return false;
+  const status = String(queueEntry.status || '').toLowerCase();
+  if (status !== 'done' || queueEntry.hasPrice !== true) return false;
+  if (toRunPricingItemKey(item) !== String(queueEntry.itemKey || '').trim()) return false;
+
+  let changed = false;
+  const nextChaosValue = Number(queueEntry.pricingChaos ?? queueEntry?.pricing?.chaos ?? 0);
+  if (Number.isFinite(nextChaosValue) && nextChaosValue > 0) {
+    const previousValue = Number(item?._networth?.value ?? 0);
+    const previousCurrency = String(item?._networth?.currency || '').toLowerCase();
+    const nextSource = String(queueEntry?.pricing?.source || item?._networth?.source || 'server_trade').trim() || 'server_trade';
+    if (previousValue !== nextChaosValue || previousCurrency !== 'chaos' || String(item?._networth?.source || '') !== nextSource) {
+      item._networth = {
+        ...(item._networth || {}),
+        value: nextChaosValue,
+        currency: 'chaos',
+        source: nextSource,
+      };
+      changed = true;
+    }
+  }
+
+  if (queueEntry?.pricing && item._pricing !== queueEntry.pricing) {
+    item._pricing = queueEntry.pricing;
+    changed = true;
+  }
+
+  return changed;
+}
+
+function applyPricingQueueStateToScan(scan) {
+  if (!scan || typeof scan !== 'object') return false;
+  const pricingEntriesByKey = getLatestPricingEntriesByItemKey();
+  if (pricingEntriesByKey.size === 0) return false;
+
+  let changed = false;
+  const collections = [
+    Array.isArray(scan.items) ? scan.items : [],
+    Array.isArray(scan?.stash?.items) ? scan.stash.items : [],
+    Array.isArray(scan?.inventory?.items) ? scan.inventory.items : [],
+  ];
+
+  collections.forEach((items) => {
+    items.forEach((item) => {
+      const queueEntry = pricingEntriesByKey.get(toRunPricingItemKey(item));
+      if (queueEntry && applyQueuePricingEntryToItem(item, queueEntry)) {
+        changed = true;
+      }
+    });
+  });
+
+  return changed;
+}
+
+function applyPricingQueueStateToAllScans() {
+  let changed = false;
+  if (applyPricingQueueStateToScan(lastScan)) {
+    changed = true;
+  }
+  if (Array.isArray(scanHistory)) {
+    scanHistory.forEach((scan) => {
+      if (scan === lastScan) return;
+      if (applyPricingQueueStateToScan(scan)) {
+        changed = true;
+      }
+    });
+  }
+  return changed;
 }
 
 function getRunItemPricingStatus(item) {
@@ -4343,28 +4694,67 @@ function getLargeScanWarningTabs(tabIndices) {
   return allTabs.filter((tab) => requestedIndices.has(Number.parseInt(String(tab.index), 10)) && largeTypes.has(String(tab.type || '')));
 }
 
+function splitLargeScanTabs(tabIndices) {
+  const allTabs = getSelectableStashTabs();
+  const requestedSet = Array.isArray(tabIndices) && tabIndices.length > 0
+    ? new Set(tabIndices)
+    : new Set(allTabs.map((tab) => Number.parseInt(String(tab.index), 10)).filter((index) => Number.isFinite(index)));
+  const largeTypes = new Set(['MapStash', 'UniqueStash']);
+  const regular = [];
+  const large = [];
+
+  allTabs.forEach((tab) => {
+    const index = Number.parseInt(String(tab.index), 10);
+    if (!Number.isFinite(index) || !requestedSet.has(index)) return;
+    if (largeTypes.has(String(tab.type || ''))) {
+      large.push(tab);
+    } else {
+      regular.push(tab);
+    }
+  });
+
+  return { regular, large };
+}
+
 async function confirmLargeTabScanIfNeeded(tabIndices, options = {}) {
+  const defaultResult = {
+    confirmed: true,
+    includeLargeTabsAtEnd: true,
+    dontShowAgain: false,
+  };
   if (options?.silent === true || options?.resumeMode === true) {
-    return true;
+    return defaultResult;
   }
-  if (hideLargeTabScanWarning === true) {
-    return true;
+  if (options?.scanAllMode !== true && hideLargeTabScanWarning === true) {
+    return defaultResult;
   }
 
   const largeTabs = getLargeScanWarningTabs(tabIndices);
-  if (largeTabs.length === 0) {
-    return true;
+  if (options?.scanAllMode !== true && largeTabs.length === 0) {
+    return defaultResult;
   }
 
-  const details = `Affected tabs: ${largeTabs.map((tab) => `${tab.name} (${tab.type})`).join(', ')}`;
   const response = await showConfirmModal({
-    title: 'Large tab sync',
-    message: 'Some selected stash tabs are large specialized tabs and may take longer to sync.',
-    details,
-    confirmText: 'Sync anyway',
+    title: options?.scanAllMode === true ? 'Full stash scan' : 'Large tab sync',
+    message: options?.scanAllMode === true
+      ? 'A full stash scan can take a while. Individual tabs can be scanned later via right-click in the stash tab list. Hold Ctrl and click tabs on the left to select multiple tabs together before using the right-click actions. If this is your first scan, a full scan is required.'
+      : 'Some selected stash tabs are large specialized tabs and may take longer to sync.',
+    details: options?.scanAllMode === true ? '' : `Affected tabs: ${largeTabs.map((tab) => `${tab.name} (${tab.type})`).join(', ')}`,
+    confirmText: 'Start scan',
     cancelText: 'Cancel',
-    checkboxLabel: "Don't show this warning again",
+    checkboxLabel: options?.scanAllMode === true
+      ? 'Include Maps and Uniques'
+      : "Don't show this warning again",
+    checkboxChecked: options?.scanAllMode === true,
   });
+
+  if (options?.scanAllMode === true) {
+    return {
+      confirmed: response.confirmed === true,
+      includeLargeTabsAtEnd: response.checked === true,
+      dontShowAgain: false,
+    };
+  }
 
   if (response.checked === true) {
     try {
@@ -4377,7 +4767,11 @@ async function confirmLargeTabScanIfNeeded(tabIndices, options = {}) {
     }
   }
 
-  return response.confirmed === true;
+  return {
+    confirmed: response.confirmed === true,
+    includeLargeTabsAtEnd: true,
+    dontShowAgain: response.checked === true,
+  };
 }
 
 // Show countdown timer (inline under net worth)
@@ -4550,10 +4944,11 @@ function buildTotalsFromItems(items) {
   for (const item of items) {
     const amount = Number(item?._networth?.value);
     if (!Number.isFinite(amount) || amount <= 0) continue;
-    const currency = String(item?._networth?.currency || 'chaos').toLowerCase();
-    const rate = getCurrencyRate(currency) || 1;
+    const descriptor = getBreakdownCurrencyDescriptor(item);
+    const bucketLabel = descriptor.displayName;
+    const rate = getCurrencyRate(descriptor.canonicalKey) || getCurrencyRate(bucketLabel) || 1;
     const sign = Number(item?._deltaSign) < 0 ? -1 : 1;
-    netWorth[currency] = (netWorth[currency] || 0) + (amount * sign);
+    netWorth[bucketLabel] = (netWorth[bucketLabel] || 0) + (amount * sign);
     totalChaos += amount * rate * sign;
   }
 
@@ -6761,6 +7156,7 @@ function saveFeedbackData(item, selectedMods) {
   // TODO: Send to server when backend is ready
   // await fetch('/api/pricing-feedback', { method: 'POST', body: JSON.stringify(feedback) });
 }
+
 
 
 

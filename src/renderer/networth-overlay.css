@@ -449,11 +449,40 @@ body {
   gap: 8px;
 }
 
+.sidebar-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .sidebar-header-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--accent-yellow);
   padding: 0 4px;
+}
+
+.sidebar-help-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid #4a4322;
+  background: rgba(var(--accent-yellow-rgb), 0.08);
+  color: var(--accent-yellow);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar-help-btn:hover {
+  background: rgba(var(--accent-yellow-rgb), 0.16);
+  border-color: rgba(var(--accent-yellow-rgb), 0.45);
 }
 
 .sidebar-sort-controls {
@@ -1121,9 +1150,7 @@ body {
 }
 
 .top-section {
-  display: grid;
-  grid-template-columns: 1fr 300px;
-  gap: 16px;
+  display: block;
   padding: 16px;
   border-bottom: 1px solid #333;
 }
@@ -1134,6 +1161,7 @@ body {
   border: 1px solid #333;
   border-radius: 6px;
   padding: 16px;
+  width: 100%;
 }
 
 .wealth-header {
@@ -1293,95 +1321,6 @@ body {
 #netWorthChart {
   width: 100%;
   height: 100%;
-}
-
-/* Breakdown Section */
-.breakdown-section {
-  background: #242424;
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 16px;
-}
-
-.breakdown-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.breakdown-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent-yellow);
-}
-
-.breakdown-buttons {
-  display: flex;
-  gap: 4px;
-}
-
-.breakdown-btn {
-  padding: 4px 8px;
-  background: #2a2a2a;
-  border: 1px solid #333;
-  border-radius: 4px;
-  color: #999;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.breakdown-btn:hover {
-  color: #e8e8e8;
-}
-
-.breakdown-btn.active {
-  background: var(--accent-yellow);
-  border-color: var(--accent-yellow);
-  color: #1a1a1a;
-}
-
-.breakdown-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.breakdown-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  background: #2a2a2a;
-  border-radius: 4px;
-}
-
-.breakdown-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 3px;
-  background: #1a1a1a;
-}
-
-.breakdown-icon img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.breakdown-name {
-  flex: 1;
-  font-size: 12px;
-  color: #e8e8e8;
-}
-
-.breakdown-value {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent-yellow);
 }
 
 /* Controls Bar */
@@ -1632,27 +1571,23 @@ body {
 
 /* Scrollbars */
 .sidebar::-webkit-scrollbar,
-.breakdown-list::-webkit-scrollbar,
 .items-table-container::-webkit-scrollbar {
   width: 8px;
 }
 
 .sidebar::-webkit-scrollbar-track,
-.breakdown-list::-webkit-scrollbar-track,
 .items-table-container::-webkit-scrollbar-track {
   background: #1a1a1a;
   border-radius: 4px;
 }
 
 .sidebar::-webkit-scrollbar-thumb,
-.breakdown-list::-webkit-scrollbar-thumb,
 .items-table-container::-webkit-scrollbar-thumb {
   background: #666;
   border-radius: 4px;
 }
 
 .sidebar::-webkit-scrollbar-thumb:hover,
-.breakdown-list::-webkit-scrollbar-thumb:hover,
 .items-table-container::-webkit-scrollbar-thumb:hover {
   background: var(--accent-yellow);
 }

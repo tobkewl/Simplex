@@ -1,10 +1,12 @@
+const { priceNetworthItemFromClientTrade } = require('../services/networth-pricing-service');
 const DEFAULT_REALM = 'pc';
 const NETWORTH_ACTIVE_LEAGUE = 'Mirage';
 const NETWORTH_SCAN_HISTORY_LIMIT = 20;
-const WEBSITE_FEATURE_MESSAGE =
-  'Pricing and run management are handled by website services and are not available in this client module.';
-const PRICING_QUEUE_LIMIT = 500;
-const SCAN_QUEUE_LIMIT = 200;
+  const WEBSITE_FEATURE_MESSAGE =
+    'Pricing and run management are handled by website services and are not available in this client module.';
+  const PRICING_QUEUE_LIMIT = 500;
+  const PRICING_HISTORY_LIMIT = 500;
+  const SCAN_QUEUE_LIMIT = 200;
 const DEFAULT_PRICING_LISTING_MODE = 'instant_buyout';
 const PRICING_LISTING_MODE_ALIASES = {
   instant_buyout_and_in_person: 'instant_buyout_and_in_person',
@@ -22,6 +24,8 @@ const PRICING_CONFIG_CACHE_MS = 60 * 60 * 1000;
 const CURRENCY_SHARD_DIVISOR = 20;
 const STASH_SCAN_RETRY_MS = 60 * 1000;
 const STASH_SCAN_BATCH_RETRY_MS = 1500;
+const STASH_SCAN_REQUEST_INTERVAL_MS = 1250;
+const NETWORTH_STATE_PERSIST_DEBOUNCE_MS = 500;
 const PRICING_QUEUE_REQUEST_INTERVAL_MS = 5000;
 const PRICING_QUEUE_REMOTE_PERSIST_INTERVAL_MS = 10000;
 const RATE_LIMIT_MIN_RETRY_MS = 1500;
@@ -753,6 +757,7 @@ function isExchangePricedCandidate(item) {
   if (maxStackSize > 1) return true;
   if (stackSize > 1) return true;
   if (frameType === 5) return true;
+  if (frameType === 6) return true;
   return false;
 }
 
@@ -904,17 +909,18 @@ function hydrateScanCurrencyRatesFromCache(state, scan) {
   applyCurrencyExchangePricingToScan(source);
 }
 
-async function fetchCurrencyRatesForLeague(apiClient, logger, state, league, realm) {
+async function fetchCurrencyRatesForLeague(apiClient, logger, state, league, realm, options = {}) {
   const safeLeague = sanitizeLeague(league);
   const safeRealm = sanitizeRealm(realm);
   if (!safeLeague) return { ...DEFAULT_CURRENCY_RATES };
+  const forceRefresh = options?.forceRefresh === true;
 
-  const cached = readCachedCurrencyRates(state, safeLeague, safeRealm);
+  const cached = forceRefresh
+    ? null
+    : readCachedCurrencyRates(state, safeLeague, safeRealm, { allowStale: true });
   if (cached) return cached;
-  const staleCached = readCachedCurrencyRates(state, safeLeague, safeRealm, { allowStale: true });
 
   if (!apiClient || typeof apiClient.getNetworthCurrencyExchangeRates !== 'function') {
-    if (staleCached) return staleCached;
     return { ...DEFAULT_CURRENCY_RATES };
   }
 
@@ -936,14 +942,10 @@ async function fetchCurrencyRatesForLeague(apiClient, logger, state, league, rea
     });
   }
 
-  if (staleCached) {
-    return staleCached;
-  }
-
   return { ...DEFAULT_CURRENCY_RATES };
 }
 
-async function enrichScanWithCurrencyRates(apiClient, logger, state, scan, fallbackLeague = null, fallbackRealm = DEFAULT_REALM) {
+async function enrichScanWithCurrencyRates(apiClient, logger, state, scan, fallbackLeague = null, fallbackRealm = DEFAULT_REALM, options = {}) {
   const source = asObject(scan);
   if (!source) return scan;
   const league = sanitizeLeague(source.league) || sanitizeLeague(fallbackLeague);
@@ -953,7 +955,7 @@ async function enrichScanWithCurrencyRates(apiClient, logger, state, scan, fallb
     return source;
   }
   const realm = sanitizeRealm(source.realm || fallbackRealm);
-  const rates = await fetchCurrencyRatesForLeague(apiClient, logger, state, league, realm);
+  const rates = await fetchCurrencyRatesForLeague(apiClient, logger, state, league, realm, options);
   source.currencyRates = rates;
   applyCurrencyExchangePricingToScan(source);
   return source;
@@ -1500,7 +1502,10 @@ async function fetchNestedSpecialTabPayload(apiClient, league, realm, payload, t
 
     for (const endpoint of endpoints) {
       try {
-        const childData = await callPoeEndpoint(apiClient, endpoint, { suppressErrorLog: true });
+        const childData = await callPoeEndpoint(apiClient, endpoint, {
+          suppressErrorLog: true,
+          minIntervalMs: STASH_SCAN_REQUEST_INTERVAL_MS,
+        });
         if (hasStashItemPayload(childData)) {
           nestedPayloads.push(childData);
           break;
@@ -1619,6 +1624,9 @@ function buildStashEndpointTemplates({ league, realm, mode = 'items' }) {
 }
 
 async function callPoeEndpoint(apiClient, endpoint, options = {}) {
+  if (Number.isFinite(options.minIntervalMs) && options.minIntervalMs > 0) {
+    await waitForStashScanRequestSlot(options.minIntervalMs);
+  }
   const response = await apiClient.callPoeApi(endpoint, {
     method: 'GET',
     suppressErrorLog: options.suppressErrorLog === true,
@@ -1677,7 +1685,10 @@ async function fetchStashOverview(apiClient, league, realm, logger, state) {
 
   if (cachedEndpoint) {
     try {
-      const data = await callPoeEndpoint(apiClient, cachedEndpoint, { suppressErrorLog: true });
+      const data = await callPoeEndpoint(apiClient, cachedEndpoint, {
+        suppressErrorLog: true,
+        minIntervalMs: STASH_SCAN_REQUEST_INTERVAL_MS,
+      });
       if (hasStashOverviewPayload(data)) {
         return data;
       }
@@ -1697,7 +1708,10 @@ async function fetchStashOverview(apiClient, league, realm, logger, state) {
   for (const endpoint of candidates) {
     if (endpoint === cachedEndpoint) continue;
     try {
-      const data = await callPoeEndpoint(apiClient, endpoint, { suppressErrorLog: true });
+      const data = await callPoeEndpoint(apiClient, endpoint, {
+        suppressErrorLog: true,
+        minIntervalMs: STASH_SCAN_REQUEST_INTERVAL_MS,
+      });
       if (hasStashOverviewPayload(data)) {
         state.stashOverviewEndpointByKey.set(cacheKey, endpoint);
         return data;
@@ -1764,7 +1778,10 @@ async function fetchStashItemsForTab(apiClient, league, realm, tabMeta, tabIndex
 
     for (const endpoint of primaryCandidates) {
       try {
-        const data = await callPoeEndpoint(apiClient, endpoint, { suppressErrorLog: true });
+        const data = await callPoeEndpoint(apiClient, endpoint, {
+          suppressErrorLog: true,
+          minIntervalMs: STASH_SCAN_REQUEST_INTERVAL_MS,
+        });
         if (hasStashItemPayload(data)) {
           return data;
         }
@@ -1823,7 +1840,10 @@ async function fetchStashItemsForTab(apiClient, league, realm, tabMeta, tabIndex
 
   for (const endpoint of fallbackCandidates) {
     try {
-      const data = await callPoeEndpoint(apiClient, endpoint, { suppressErrorLog: true });
+      const data = await callPoeEndpoint(apiClient, endpoint, {
+        suppressErrorLog: true,
+        minIntervalMs: STASH_SCAN_REQUEST_INTERVAL_MS,
+      });
       if (hasStashItemPayload(data)) {
         return data;
       }
@@ -1852,7 +1872,10 @@ async function fetchStashTab(apiClient, league, realm, tabIndex, logger, state, 
   if (template) {
     try {
       const endpoint = template(tabIndex);
-      const data = await callPoeEndpoint(apiClient, endpoint, { suppressErrorLog: true });
+      const data = await callPoeEndpoint(apiClient, endpoint, {
+        suppressErrorLog: true,
+        minIntervalMs: STASH_SCAN_REQUEST_INTERVAL_MS,
+      });
       if (mode === 'items' && !hasStashItemPayload(data)) {
         throw new Error('Stash endpoint returned metadata without item payload');
       }
@@ -1881,6 +1904,19 @@ function wait(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+let lastStashScanRequestAt = 0;
+
+async function waitForStashScanRequestSlot(minIntervalMs = STASH_SCAN_REQUEST_INTERVAL_MS) {
+  const intervalMs = Math.max(0, Number(minIntervalMs) || 0);
+  if (intervalMs <= 0) return;
+  const now = Date.now();
+  const waitMs = Math.max(0, (lastStashScanRequestAt + intervalMs) - now);
+  if (waitMs > 0) {
+    await wait(waitMs);
+  }
+  lastStashScanRequestAt = Date.now();
 }
 
 function buildRateLimitedScanMessage(completedTabs, totalTabs, pendingTabs) {
@@ -2039,11 +2075,76 @@ function pushScanToState(state, scan) {
   state.scanHistory = [scan, ...state.scanHistory].slice(0, NETWORTH_SCAN_HISTORY_LIMIT);
 }
 
+function getScanTimestampValue(scan) {
+  const source = asObject(scan) || {};
+  const parsed = Number.parseInt(String(source.scannedAt ?? source.timestamp ?? source.updatedAt ?? 0), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getScanHistoryKey(scan) {
+  const source = asObject(scan) || {};
+  const scanId = safeString(source.id || '');
+  if (scanId) return `id:${scanId}`;
+  const league = sanitizeLeague(source.league) || '';
+  const realm = sanitizeRealm(source.realm);
+  const timestamp = getScanTimestampValue(source);
+  return `scope:${league}:${realm}:${timestamp}`;
+}
+
+function shouldPreferLocalScan(state, localScan, remoteScan, league, realm) {
+  const safeLeague = sanitizeLeague(league);
+  const safeRealm = sanitizeRealm(realm);
+  if (!safeLeague) return false;
+  const local = asObject(localScan);
+  if (!local) return false;
+  const remote = asObject(remoteScan);
+  if (!remote) return true;
+
+  const localTimestamp = getScanTimestampValue(local);
+  const remoteTimestamp = getScanTimestampValue(remote);
+  if (localTimestamp > remoteTimestamp) return true;
+  if (remoteTimestamp > localTimestamp) return false;
+
+  const localIsDirty =
+    state.latestScanDirty === true &&
+    isScanMatchForScope(local, safeLeague, safeRealm);
+  if (localIsDirty) return true;
+
+  return false;
+}
+
+function mergeAuthoritativeScanHistory(state, remoteHistory, localHistory, league, realm, limit) {
+  const mergedByKey = new Map();
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : NETWORTH_SCAN_HISTORY_LIMIT;
+  const remoteEntries = asArray(remoteHistory);
+  const localEntries = asArray(localHistory);
+
+  for (const entry of remoteEntries) {
+    const source = asObject(entry);
+    if (!source) continue;
+    mergedByKey.set(getScanHistoryKey(source), source);
+  }
+
+  for (const entry of localEntries) {
+    const source = asObject(entry);
+    if (!source) continue;
+    const key = getScanHistoryKey(source);
+    const existing = mergedByKey.get(key);
+    if (!existing || shouldPreferLocalScan(state, source, existing, league, realm)) {
+      mergedByKey.set(key, source);
+    }
+  }
+
+  return Array.from(mergedByKey.values())
+    .sort((left, right) => getScanTimestampValue(right) - getScanTimestampValue(left))
+    .slice(0, safeLimit);
+}
+
 function hydrateScanIntoState(state, scan) {
   const source = asObject(scan);
   if (!source) return;
   const scanId = safeString(source.id || '');
-  const scannedAt = Number.parseInt(String(source.scannedAt ?? source.timestamp ?? 0), 10);
+  const scannedAt = getScanTimestampValue(source);
   state.lastScan = source;
   state.scanHistory = [
     source,
@@ -2318,16 +2419,17 @@ function toPricingItemKey(item) {
   ].join('|');
 }
 
-function buildPricingQueueEntry(item, league) {
-  const source = asObject(item) || {};
-  const itemKey = toPricingItemKey(source);
-  const now = Date.now();
+  function buildPricingQueueEntry(item, league) {
+    const source = asObject(item) || {};
+    const itemKey = toPricingItemKey(source);
+    const now = Date.now();
   return {
     itemKey,
     league: sanitizeLeague(league),
     name: safeString(source.name || source.typeLine || source.baseType || '') || 'Unknown Item',
     item: source,
     status: 'queued',
+    resultKind: 'pending',
     hasPrice: false,
     pricing: null,
     pricingChaos: null,
@@ -2335,9 +2437,41 @@ function buildPricingQueueEntry(item, league) {
     lastError: null,
     retryAt: null,
     createdAt: now,
-    updatedAt: now,
-  };
-}
+      updatedAt: now,
+    };
+  }
+
+  function isTerminalPricingQueueStatus(status) {
+    const normalized = safeString(status || '').toLowerCase();
+    return normalized === 'done' || normalized === 'failed';
+  }
+
+  function buildPricingHistoryId(entry) {
+    const source = asObject(entry) || {};
+    const itemKey = safeString(source.itemKey || toPricingItemKey(source.item) || source.id || 'pricing');
+    const status = safeString(source.status || '');
+    const resultKind = safeString(source.resultKind || '');
+    const updatedAt = Number(source.updatedAt || source.createdAt || 0);
+    return [itemKey || 'pricing', status || 'unknown', resultKind || 'unknown', updatedAt || Date.now()].join('|');
+  }
+
+  function buildPricingHistoryEntry(entry) {
+    const source = asObject(entry) || {};
+    if (!isTerminalPricingQueueStatus(source.status)) return null;
+    const updatedAt = Number(source.updatedAt || source.createdAt || Date.now());
+    const createdAt = Number(source.createdAt || updatedAt || Date.now());
+    return {
+      ...source,
+      id: safeString(source.id || '') || buildPricingHistoryId(source),
+      itemKey: safeString(source.itemKey || toPricingItemKey(source.item) || ''),
+      status: safeString(source.status || 'done') || 'done',
+      resultKind: safeString(source.resultKind || '') || (source.hasPrice === true ? 'priced' : 'error'),
+      isHistory: true,
+      kind: 'pricing',
+      createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
+      updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now(),
+    };
+  }
 
 function normalizePricingFailureStateMap(source) {
   const input = asObject(source) || {};
@@ -2388,6 +2522,7 @@ function buildScanQueueEntry(payload = {}) {
     queuedItems: Number.isFinite(queuedItems) && queuedItems >= 0 ? queuedItems : 0,
     hasPrice: false,
     lastError: safeString(source.lastError || ''),
+    retryAt: parseRetryAt(source.retryAt),
     createdAt: Number.isFinite(Number(source.createdAt)) ? Number(source.createdAt) : now,
     updatedAt: Number.isFinite(Number(source.updatedAt)) ? Number(source.updatedAt) : now,
   };
@@ -2408,6 +2543,12 @@ function parsePricingResult(response) {
     divine: divine !== null ? divine : 0,
     serverPricingAvailable: true,
   };
+}
+
+function isNoComparablePricingError(message) {
+  const text = safeString(message).toLowerCase();
+  if (!text) return false;
+  return text.includes('no comparable listings found');
 }
 
 function applyPricingToScanItem(item, itemKey, pricing) {
@@ -2700,12 +2841,14 @@ function registerUnavailableHandlers(ipcMain) {
     'networth:getRuns': [],
     'networth:getActiveRun': null,
     'networth:priceItem': { success: false, error: WEBSITE_FEATURE_MESSAGE },
-    'networth:getPricingQueue': [],
-    'networth:pausePricingQueue': false,
-    'networth:resumePricingQueue': false,
-    'networth:getTaskQueue': { pricing: [], scan: [], pricingPaused: false },
-    'networth:removePricingQueueItem': false,
-    'networth:clearPricingQueue': false,
+      'networth:getPricingQueue': [],
+      'networth:pausePricingQueue': false,
+      'networth:resumePricingQueue': false,
+      'networth:getTaskQueue': { pricing: [], pricingHistory: [], scan: [], pricingPaused: false },
+      'networth:removePricingQueueItem': false,
+      'networth:removePricingHistoryItem': false,
+      'networth:clearPricingQueue': false,
+      'networth:clearPricingHistory': false,
     'networth:enqueuePricingItems': { queued: 0, error: WEBSITE_FEATURE_MESSAGE },
     'networth:saveManualPricing': { success: false, error: WEBSITE_FEATURE_MESSAGE },
     'networth:enqueueUnpricedItems': { queued: 0, error: WEBSITE_FEATURE_MESSAGE },
@@ -2742,12 +2885,13 @@ function registerNetworthIpcHandlers({
 }) {
   const state = {
     lastScan: null,
-    scanHistory: [],
-    scanHistoryClearedAt: 0,
-    currencyRatesByScope: {},
-    pricingQueue: [],
-    scanQueue: [],
-    pricingQueueRunning: false,
+      scanHistory: [],
+      scanHistoryClearedAt: 0,
+      currencyRatesByScope: {},
+      pricingQueue: [],
+      pricingHistory: [],
+      scanQueue: [],
+      pricingQueueRunning: false,
     pricingQueuePaused: false,
     stashEndpointTemplateByKey: new Map(),
     stashOverviewEndpointByKey: new Map(),
@@ -2827,22 +2971,38 @@ function registerNetworthIpcHandlers({
       state.pricingConfigFetchedAt = Number.isFinite(fetchedAt) && fetchedAt > 0 ? fetchedAt : Date.now();
     }
 
-    if (Array.isArray(settings.netWorthPricingQueue)) {
-      state.pricingQueue = settings.netWorthPricingQueue
-        .map((entry) => {
-          const source = asObject(entry);
+      if (Array.isArray(settings.netWorthPricingQueue)) {
+        state.pricingQueue = settings.netWorthPricingQueue
+          .map((entry) => {
+            const source = asObject(entry);
           if (!source) return null;
           const status = safeString(source.status);
+          const resultKind = safeString(source.resultKind || '');
           return {
             ...source,
             status: status === 'processing' ? 'queued' : (status || 'queued'),
+            resultKind: resultKind || ((status || 'queued') === 'done'
+              ? (source.hasPrice === true ? 'priced' : 'no_results')
+              : 'pending'),
           };
         })
-        .filter(Boolean)
-        .slice(0, PRICING_QUEUE_LIMIT);
-    }
+          .filter(Boolean)
+          .slice(0, PRICING_QUEUE_LIMIT);
+      }
 
-    state.pricingQueuePaused = settings.netWorthPricingQueuePaused === true;
+      if (Array.isArray(settings.netWorthPricingHistory)) {
+        state.pricingHistory = settings.netWorthPricingHistory
+          .map((entry) => buildPricingHistoryEntry(entry))
+          .filter(Boolean)
+          .slice(0, PRICING_HISTORY_LIMIT);
+      } else if (Array.isArray(settings.netWorthPricingQueue)) {
+        state.pricingHistory = settings.netWorthPricingQueue
+          .map((entry) => buildPricingHistoryEntry(entry))
+          .filter(Boolean)
+          .slice(0, PRICING_HISTORY_LIMIT);
+      }
+
+      state.pricingQueuePaused = settings.netWorthPricingQueuePaused === true;
 
     if (Array.isArray(settings.netWorthScanQueue)) {
       state.scanQueue = settings.netWorthScanQueue
@@ -2867,7 +3027,9 @@ function registerNetworthIpcHandlers({
     }
   };
 
-  const persistState = () => {
+  let persistStateTimer = null;
+
+  const writeStateToSettings = () => {
     const settings = getSettings();
     if (!settings || typeof settings !== 'object') return;
 
@@ -2875,15 +3037,36 @@ function registerNetworthIpcHandlers({
     settings.netWorthScanHistory = state.scanHistory.slice(0, NETWORTH_SCAN_HISTORY_LIMIT);
     settings.netWorthScanHistoryClearedAt = state.scanHistoryClearedAt;
     settings.netWorthCurrencyRatesByScope = state.currencyRatesByScope;
-    settings.netWorthCachedStashTabs = state.cachedStashTabs;
-    settings.netWorthPricingConfig = state.pricingConfig;
-    settings.netWorthPricingConfigFetchedAt = state.pricingConfigFetchedAt;
-    settings.netWorthPricingQueue = state.pricingQueue.slice(0, PRICING_QUEUE_LIMIT);
-    settings.netWorthPricingQueuePaused = state.pricingQueuePaused === true;
-    settings.netWorthScanQueue = state.scanQueue;
+      settings.netWorthCachedStashTabs = state.cachedStashTabs;
+      settings.netWorthPricingConfig = state.pricingConfig;
+      settings.netWorthPricingConfigFetchedAt = state.pricingConfigFetchedAt;
+      settings.netWorthPricingQueue = state.pricingQueue.slice(0, PRICING_QUEUE_LIMIT);
+      settings.netWorthPricingHistory = state.pricingHistory.slice(0, PRICING_HISTORY_LIMIT);
+      settings.netWorthPricingQueuePaused = state.pricingQueuePaused === true;
+      settings.netWorthScanQueue = state.scanQueue;
     settings.netWorthRateLimits = normalizeRateLimitState(state.rateLimits);
     settings.netWorthPricingFailureStateByItemKey = normalizePricingFailureStateMap(state.pricingFailureStateByItemKey);
     saveSettings(settings);
+  };
+
+  const persistState = (immediate = false) => {
+    if (persistStateTimer) {
+      clearTimeout(persistStateTimer);
+      persistStateTimer = null;
+    }
+
+    if (immediate) {
+      writeStateToSettings();
+      return;
+    }
+
+    persistStateTimer = setTimeout(() => {
+      persistStateTimer = null;
+      writeStateToSettings();
+    }, NETWORTH_STATE_PERSIST_DEBOUNCE_MS);
+    if (typeof persistStateTimer?.unref === 'function') {
+      persistStateTimer.unref();
+    }
   };
 
   const isScanVisibleInHistory = (scan) => {
@@ -2927,7 +3110,7 @@ function registerNetworthIpcHandlers({
   const getPricingConfig = async () => {
     const cached = normalizePricingConfigPayload(state.pricingConfig);
     const now = Date.now();
-    if (cached && now - Number(state.pricingConfigFetchedAt || 0) < PRICING_CONFIG_CACHE_MS) {
+    if (cached) {
       return cached;
     }
 
@@ -3003,12 +3186,26 @@ function registerNetworthIpcHandlers({
     return state.pricingQueuePaused !== true;
   };
 
-  const prunePricingQueue = () => {
-    if (state.pricingQueue.length <= PRICING_QUEUE_LIMIT) return;
-    state.pricingQueue = state.pricingQueue
-      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
-      .slice(0, PRICING_QUEUE_LIMIT);
-  };
+    const prunePricingQueue = () => {
+      if (state.pricingQueue.length <= PRICING_QUEUE_LIMIT) return;
+      state.pricingQueue = state.pricingQueue
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+        .slice(0, PRICING_QUEUE_LIMIT);
+    };
+
+    const appendPricingHistoryEntry = (entry) => {
+      const normalized = buildPricingHistoryEntry(entry);
+      if (!normalized) return null;
+      const normalizedId = safeString(normalized.id);
+      if (normalizedId) {
+        state.pricingHistory = state.pricingHistory.filter((existing) => safeString(existing?.id) !== normalizedId);
+      }
+      state.pricingHistory.unshift(normalized);
+      if (state.pricingHistory.length > PRICING_HISTORY_LIMIT) {
+        state.pricingHistory = state.pricingHistory.slice(0, PRICING_HISTORY_LIMIT);
+      }
+      return normalized;
+    };
 
   const pruneScanQueue = () => {
     if (state.scanQueue.length <= SCAN_QUEUE_LIMIT) return;
@@ -3191,32 +3388,38 @@ function registerNetworthIpcHandlers({
     };
   };
 
-  const upsertQueueEntryFromPricing = (item, league, pricing, errorMessage = null) => {
+  const upsertQueueEntryFromPricing = (item, league, pricing, errorMessage = null, options = {}) => {
     const itemKey = toPricingItemKey(item);
     const now = Date.now();
     const existingIndex = state.pricingQueue.findIndex((entry) => entry.itemKey === itemKey);
     const chaos = parseOptionalFloat(pricing?.chaos);
     const divine = parseOptionalFloat(pricing?.divine);
+    const sourceOptions = asObject(options) || {};
+    const explicitStatus = safeString(sourceOptions.status || '');
+    const explicitResultKind = safeString(sourceOptions.resultKind || '');
+    const status = explicitStatus || (errorMessage ? 'failed' : 'done');
     const nextEntry = {
       ...(existingIndex >= 0 ? state.pricingQueue[existingIndex] : buildPricingQueueEntry(item, league)),
       item,
       league: sanitizeLeague(league),
-      status: errorMessage ? 'failed' : 'done',
-      hasPrice: !errorMessage && pricing?.estimated === true,
-      pricing: errorMessage ? null : pricing,
-      pricingChaos: !errorMessage && chaos !== null ? chaos : null,
-      pricingDivine: !errorMessage && divine !== null ? divine : null,
+      status,
+      resultKind: explicitResultKind || (status === 'done' ? (pricing?.estimated === true ? 'priced' : 'no_results') : 'error'),
+      hasPrice: status === 'done' && pricing?.estimated === true,
+      pricing: status === 'done' ? pricing : null,
+      pricingChaos: status === 'done' && chaos !== null ? chaos : null,
+      pricingDivine: status === 'done' && divine !== null ? divine : null,
       lastError: errorMessage,
       retryAt: null,
       updatedAt: now,
     };
-    if (existingIndex >= 0) {
-      state.pricingQueue.splice(existingIndex, 1, nextEntry);
-    } else {
-      state.pricingQueue.unshift(nextEntry);
-    }
-    prunePricingQueue();
-  };
+      if (existingIndex >= 0) {
+        state.pricingQueue.splice(existingIndex, 1, nextEntry);
+      } else {
+        state.pricingQueue.unshift(nextEntry);
+      }
+      prunePricingQueue();
+      appendPricingHistoryEntry(nextEntry);
+    };
 
   const processPricingQueue = async () => {
     if (state.pricingQueueRunning) return;
@@ -3271,9 +3474,11 @@ function registerNetworthIpcHandlers({
             listingMode: getSettings()?.netWorthPricingListingMode,
             queueMode: true,
           });
+          const pricingConfig = await getPricingConfig();
+          const chaosRates = await fetchCurrencyRatesForLeague(apiClient, logger, state, nextEntry.league, DEFAULT_REALM);
           logger.info('networth:pricing:request', {
             mode: 'queue',
-            endpoint: '/networth/price-item',
+            endpoint: 'direct-trade',
             league: nextEntry.league,
             item: {
               id: safeString(pricingItem.id || ''),
@@ -3285,10 +3490,13 @@ function registerNetworthIpcHandlers({
             },
             options: pricingOptions,
           });
-          const response = await apiClient.priceNetworthItem({
-            item: pricingItem,
-            league: nextEntry.league,
-            options: pricingOptions,
+          const response = await priceNetworthItemFromClientTrade({
+            itemInput: pricingItem,
+            leagueInput: nextEntry.league,
+            optionsInput: pricingOptions,
+            pricingConfig,
+            chaosRates,
+            logger,
           });
           const parsedPricing = parsePricingResult(response);
           logger.info('networth:pricing:response', {
@@ -3302,7 +3510,17 @@ function registerNetworthIpcHandlers({
             error: safeString(parsedPricing.error || ''),
           });
           if (parsedPricing.estimated !== true) {
-            throw new Error(safeString(parsedPricing.error) || 'No estimated price returned by server pricing');
+            const pricingError = safeString(parsedPricing.error) || 'No estimated price returned by server pricing';
+            if (isNoComparablePricingError(pricingError)) {
+              clearPricingFailureState(nextEntry.itemKey);
+              upsertQueueEntryFromPricing(nextEntry.item, nextEntry.league, parsedPricing, pricingError, {
+                status: 'done',
+                resultKind: 'no_results',
+              });
+              persistState();
+              continue;
+            }
+            throw new Error(pricingError);
           }
           upsertQueueEntryFromPricing(nextEntry.item, nextEntry.league, parsedPricing, null);
           clearPricingFailureState(nextEntry.itemKey);
@@ -3558,7 +3776,7 @@ function registerNetworthIpcHandlers({
               retryAt,
               partialMessage,
             });
-            await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm);
+            await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm, { forceRefresh: true });
             sendSnapshotProgress({
               phase: 'rate_limited',
               tabIndex,
@@ -3643,7 +3861,7 @@ function registerNetworthIpcHandlers({
         retryAt,
         partialMessage,
       });
-      await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm);
+      await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm, { forceRefresh: true });
       updateCachedTabsState(state, league, realm, tabSummary, now, false);
       saveLastLeague(league);
       persistState();
@@ -3734,6 +3952,7 @@ function registerNetworthIpcHandlers({
           tabNames: [safeString(tabMeta?.name || `Tab ${tabIndex + 1}`)],
           queuedItems: 0,
           lastError: '',
+          retryAt: scanTabIndices.includes(tabIndex) ? null : toRetryTimestamp(STASH_SCAN_BATCH_RETRY_MS),
         });
       });
 
@@ -3757,6 +3976,7 @@ function registerNetworthIpcHandlers({
               tabNames: [safeString(tabMeta?.name || `Tab ${tabIndex + 1}`)],
               queuedItems: 0,
               lastError: '',
+              retryAt: null,
             });
           }
           if (idx > 0) {
@@ -3777,6 +3997,7 @@ function registerNetworthIpcHandlers({
               tabNames: [safeString(tabMeta?.name || `Tab ${tabIndex + 1}`)],
               queuedItems: itemsForTab.length,
               lastError: '',
+              retryAt: null,
             });
           }
         } catch (error) {
@@ -3784,10 +4005,19 @@ function registerNetworthIpcHandlers({
           if (isRateLimitError(error)) {
             const now = Date.now();
             const pendingTabIndices = buildPendingTabIndices(scanTabIndices, idx, deferredTabIndices);
+            logger.warn('networth:scan:rate-limited', {
+              league,
+              realm,
+              tabIndex,
+              pendingTabs: pendingTabIndices.length,
+              error: message,
+            });
             pendingTabIndices.forEach((pendingTabIndex) => {
               const pendingMeta = tabSummary.tabs.find((tab) => tab.index === pendingTabIndex) || normalizeTab({ i: pendingTabIndex }, pendingTabIndex);
               const pendingEntryId = scanQueueEntryIdsByTab.get(pendingTabIndex) || `scan-tab-${league}-${pendingTabIndex}`;
               scanQueueEntryIdsByTab.set(pendingTabIndex, pendingEntryId);
+              const retryDelayMs = resolveRateLimitDelayMs(error, STASH_SCAN_RETRY_MS);
+              const retryAt = toRetryTimestamp(retryDelayMs);
               upsertScanQueueEntry({
                 id: pendingEntryId,
                 type: 'tab_scan',
@@ -3798,6 +4028,7 @@ function registerNetworthIpcHandlers({
                 tabNames: [safeString(pendingMeta?.name || `Tab ${pendingTabIndex + 1}`)],
                 queuedItems: 0,
                 lastError: message,
+                retryAt,
               });
             });
             const retryDelayMs = resolveRateLimitDelayMs(error, STASH_SCAN_RETRY_MS);
@@ -3835,7 +4066,7 @@ function registerNetworthIpcHandlers({
               retryAt,
               partialMessage,
             });
-            await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm);
+            await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm, { forceRefresh: true });
             pushScanToState(state, scan);
             persistState();
             await saveScanSnapshotRemote(apiClient, logger, scan);
@@ -3869,6 +4100,7 @@ function registerNetworthIpcHandlers({
               tabNames: [safeString(tabMeta?.name || `Tab ${tabIndex + 1}`)],
               queuedItems: 0,
               lastError: message,
+              retryAt: null,
             });
           }
           logger.warn('networth:scan:tab-error', { league, realm, tabIndex, error: message });
@@ -3943,7 +4175,7 @@ function registerNetworthIpcHandlers({
         retryAt,
         partialMessage,
       });
-      await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm);
+      await enrichScanWithCurrencyRates(apiClient, logger, state, scan, league, realm, { forceRefresh: true });
 
       pushScanToState(state, scan);
       updateCachedTabsState(state, league, realm, tabSummary, now, false);
@@ -3995,18 +4227,16 @@ function registerNetworthIpcHandlers({
     const activeLeague = NETWORTH_ACTIVE_LEAGUE;
     if (typeof payload === 'string') {
       const league = activeLeague;
-      const remote = await loadLatestScanRemote(apiClient, logger, league, DEFAULT_REALM);
-      if (remote) {
-        await enrichScanWithCurrencyRates(apiClient, logger, state, remote, league, DEFAULT_REALM);
-        hydrateScanIntoState(state, remote);
-        persistState();
-        return remote;
-      }
       const local = findLatestScanForScope(state, league, DEFAULT_REALM);
-      if (local) {
-        await enrichScanWithCurrencyRates(apiClient, logger, state, local, league, DEFAULT_REALM);
+      const remote = await loadLatestScanRemote(apiClient, logger, league, DEFAULT_REALM);
+      const preferred = shouldPreferLocalScan(state, local, remote, league, DEFAULT_REALM) ? local : remote;
+      if (preferred) {
+        await enrichScanWithCurrencyRates(apiClient, logger, state, preferred, league, DEFAULT_REALM);
+        if (preferred === remote) {
+          hydrateScanIntoState(state, remote);
+        }
         persistState();
-        return local;
+        return preferred;
       }
       return null;
     }
@@ -4014,18 +4244,16 @@ function registerNetworthIpcHandlers({
     const safePayload = asObject(payload) || {};
     const league = activeLeague;
     const realm = sanitizeRealm(safePayload.realm);
-    const remote = await loadLatestScanRemote(apiClient, logger, league, realm);
-    if (remote) {
-      await enrichScanWithCurrencyRates(apiClient, logger, state, remote, league, realm);
-      hydrateScanIntoState(state, remote);
-      persistState();
-      return remote;
-    }
     const local = findLatestScanForScope(state, league, realm);
-    if (local) {
-      await enrichScanWithCurrencyRates(apiClient, logger, state, local, league, realm);
+    const remote = await loadLatestScanRemote(apiClient, logger, league, realm);
+    const preferred = shouldPreferLocalScan(state, local, remote, league, realm) ? local : remote;
+    if (preferred) {
+      await enrichScanWithCurrencyRates(apiClient, logger, state, preferred, league, realm);
+      if (preferred === remote) {
+        hydrateScanIntoState(state, remote);
+      }
       persistState();
-      return local;
+      return preferred;
     }
     return null;
   });
@@ -4044,24 +4272,23 @@ function registerNetworthIpcHandlers({
 
     const apiClient = getApiClient();
     const remoteHistory = await loadScanHistoryRemote(apiClient, logger, league, realm, safeLimit);
-    if (remoteHistory.length > 0) {
-      for (let index = remoteHistory.length - 1; index >= 0; index -= 1) {
-        await enrichScanWithCurrencyRates(apiClient, logger, state, remoteHistory[index], league, realm);
-        hydrateScanIntoState(state, remoteHistory[index]);
-      }
-      persistState();
-      return remoteHistory.filter((entry) => isScanVisibleInHistory(entry)).slice(0, safeLimit);
-    }
-
     const localHistory = state.scanHistory
       .filter((entry) => isScanMatchForScope(entry, league, realm))
-      .filter((entry) => isScanVisibleInHistory(entry))
-      .slice(0, safeLimit);
-    for (const entry of localHistory) {
+      .filter((entry) => isScanVisibleInHistory(entry));
+
+    const authoritativeHistory = remoteHistory.length > 0
+      ? mergeAuthoritativeScanHistory(state, remoteHistory, localHistory, league, realm, safeLimit)
+      : localHistory.slice(0, safeLimit);
+
+    for (let index = authoritativeHistory.length - 1; index >= 0; index -= 1) {
+      const entry = authoritativeHistory[index];
       await enrichScanWithCurrencyRates(apiClient, logger, state, entry, league, realm);
+      hydrateScanIntoState(state, entry);
     }
     persistState();
-    return localHistory;
+    return authoritativeHistory
+      .filter((entry) => isScanVisibleInHistory(entry))
+      .slice(0, safeLimit);
   });
 
   if (enableDevWebsiteFeatures === true) {
@@ -4102,9 +4329,11 @@ function registerNetworthIpcHandlers({
           ...rawOptions,
           listingMode: rawOptions.listingMode ?? getSettings()?.netWorthPricingListingMode,
         });
+        const pricingConfig = await getPricingConfig();
+        const chaosRates = await fetchCurrencyRatesForLeague(apiClient, logger, state, safeLeague, DEFAULT_REALM);
         logger.info('networth:pricing:request', {
           mode: 'manual-reprice',
-          endpoint: '/networth/price-item',
+          endpoint: 'direct-trade',
           league: safeLeague,
           item: {
             id: safeString(safeItem.id || ''),
@@ -4116,10 +4345,13 @@ function registerNetworthIpcHandlers({
           },
           options: safeOptions,
         });
-        const response = await apiClient.priceNetworthItem({
-          item: safeItem,
-          league: safeLeague,
-          options: safeOptions,
+        const response = await priceNetworthItemFromClientTrade({
+          itemInput: safeItem,
+          leagueInput: safeLeague,
+          optionsInput: safeOptions,
+          pricingConfig,
+          chaosRates,
+          logger,
         });
         const pricing = parsePricingResult(response);
         logger.info('networth:pricing:response', {
@@ -4192,11 +4424,12 @@ function registerNetworthIpcHandlers({
       }
     });
 
-  try {
-    ipcMain.removeHandler('networth:getTaskQueue');
-  } catch {}
-  ipcMain.handle('networth:getTaskQueue', async () => ({
+    try {
+      ipcMain.removeHandler('networth:getTaskQueue');
+    } catch {}
+    ipcMain.handle('networth:getTaskQueue', async () => ({
       pricing: state.pricingQueue,
+      pricingHistory: state.pricingHistory,
       scans: state.scanQueue,
       pricingPaused: state.pricingQueuePaused,
       rateLimits: state.rateLimits,
@@ -4244,11 +4477,33 @@ function registerNetworthIpcHandlers({
     });
 
     try {
+      ipcMain.removeHandler('networth:removePricingHistoryItem');
+    } catch {}
+    ipcMain.handle('networth:removePricingHistoryItem', async (_event, id) => {
+      const safeId = safeString(id);
+      if (!safeId) return false;
+      const before = state.pricingHistory.length;
+      state.pricingHistory = state.pricingHistory.filter((entry) => safeString(entry?.id) !== safeId);
+      const changed = state.pricingHistory.length !== before;
+      if (changed) persistState();
+      return changed;
+    });
+
+    try {
       ipcMain.removeHandler('networth:clearPricingQueue');
     } catch {}
     ipcMain.handle('networth:clearPricingQueue', async () => {
       state.pricingQueue = [];
       state.pricingQueuePaused = false;
+      persistState();
+      return true;
+    });
+
+    try {
+      ipcMain.removeHandler('networth:clearPricingHistory');
+    } catch {}
+    ipcMain.handle('networth:clearPricingHistory', async () => {
+      state.pricingHistory = [];
       persistState();
       return true;
     });
@@ -4340,6 +4595,12 @@ function registerNetworthIpcHandlers({
   logger.info('networth:ipc-registered', {
     channels: toChannelsCount().length,
   });
+
+  return {
+    flushState() {
+      persistState(true);
+    },
+  };
 }
 
 module.exports = {

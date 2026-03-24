@@ -24,24 +24,7 @@
             <option value="">Loading...</option>
           </select>
           <button id="queueBtn" class="btn btn-secondary queue-btn">Queue</button>
-          <div class="sync-split">
-            <button id="syncTabsBtn" class="btn btn-primary split-main">Sync tab</button>
-            <button id="syncDropdownBtn" class="btn btn-primary split-caret" aria-label="Sync options">&#9662;</button>
-            <div id="scanMenu" class="dropdown-menu">
-              <div class="dropdown-item dropdown-action" id="syncAllAction">Sync all</div>
-              <label class="dropdown-option" for="autoQueueUnpricedToggle">
-                <input type="checkbox" id="autoQueueUnpricedToggle">
-                <span>Auto-price unpriced after sync</span>
-              </label>
-              <div class="dropdown-item dropdown-action" id="queueUnpricedNowAction">Queue unpriced now</div>
-              <div class="dropdown-divider"></div>
-              <div class="dropdown-header">Select stash tabs</div>
-              <div id="scanMenuList" class="dropdown-list"></div>
-              <div class="dropdown-footer">
-                <button id="scanSelectedBtn" class="btn btn-primary btn-small">Sync selected</button>
-              </div>
-            </div>
-          </div>
+          <button id="syncTabsBtn" class="btn btn-primary">Scan</button>
           <div class="sync-status idle" id="syncStatus" title="Not synced">
             <span class="sync-status-icon" aria-hidden="true"></span>
           </div>
@@ -53,7 +36,23 @@
         <!-- Left Sidebar - Stash Tabs -->
         <div class="sidebar">
           <div class="sidebar-header">
-            <div class="sidebar-header-title">Stash Tabs</div>
+              <div class="sidebar-header-top">
+              <div
+                class="sidebar-header-title"
+                title="Right-click tabs for scan and smart price actions. Hold Ctrl and click tabs to select multiple tabs together."
+              >
+                Stash Tabs
+              </div>
+              <button
+                id="stashTabsHelpBtn"
+                class="sidebar-help-btn"
+                type="button"
+                title="Right-click tabs for scan and smart price actions. Hold Ctrl and click tabs to select multiple tabs together."
+                aria-label="Stash tab controls help"
+              >
+                ?
+              </button>
+            </div>
             <div class="sidebar-sort-controls" id="tabSortControls">
               <button class="sidebar-sort-btn active" data-tab-sort-key="value" type="button">Value</button>
               <button class="sidebar-sort-btn" data-tab-sort-key="name" type="button">Name</button>
@@ -76,11 +75,11 @@
             <!-- Run tabs will be added here dynamically -->
           </div>
 
-                    <!-- Top Section: Wealth Graph + Breakdown -->
-          <div id="itemsView" class="items-view">
-            <div class="top-section">
-              <!-- Wealth Graph -->
-              <div class="wealth-section">
+                    <!-- Top Section: Wealth Graph -->
+            <div id="itemsView" class="items-view">
+              <div class="top-section">
+                <!-- Wealth Graph -->
+                <div class="wealth-section">
                 <!-- Run Timer (appears above wealth section during active run) -->
                 <div class="wealth-run-timer" id="wealthRunTimer" style="display: none;">
                   <span class="run-timer-icon">T</span>
@@ -104,25 +103,11 @@
                   <div class="wealth-total" id="wealthTotal">-</div>
                   <div class="wealth-delta" id="wealthDelta"></div>
                 </div>
-                <div class="chart-container">
-                  <canvas id="netWorthChart"></canvas>
-                </div>
-              </div>
-
-              <!-- Breakdown Section -->
-              <div class="breakdown-section">
-                <div class="breakdown-header">
-                  <div class="breakdown-title">Breakdown</div>
-                  <div class="breakdown-buttons">
-                    <button class="breakdown-btn active" data-view="divines">Value</button>
-                    <button class="breakdown-btn" data-view="percentage">Percentage</button>
+                  <div class="chart-container">
+                    <canvas id="netWorthChart"></canvas>
                   </div>
                 </div>
-                <div class="breakdown-list" id="breakdownList">
-                  <!-- Currency breakdown will be rendered here -->
-                </div>
               </div>
-            </div>
 
             <!-- Controls Bar -->
             <div class="controls-bar">
@@ -133,6 +118,15 @@
               <div class="controls-right">
                 <button id="runSmartPriceBtn" class="btn btn-secondary btn-small" type="button" style="display: none;">Smart price run loot</button>
                 <div class="selected-total" id="selectedTotal">Selected total: -</div>
+                <button
+                  id="stashContentHelpBtn"
+                  class="sidebar-help-btn"
+                  type="button"
+                  title="Hold Ctrl while hovering an item to show the item details tooltip."
+                  aria-label="Stash item controls help"
+                >
+                  ?
+                </button>
               </div>
             </div>
 

@@ -4,7 +4,11 @@
  */
 
 const fetch = require('node-fetch')
+const logger = require('../common/logger')
 const REQUEST_TIMEOUT_MS = 10000
+const POE_API_BASE_URL = process.env.SIMPLEX_POE_API_BASE_URL || 'https://api.pathofexile.com'
+const POE_TOKEN_REFRESH_GRACE_MS = 60 * 1000
+const POE_USER_AGENT = process.env.SIMPLEX_POE_USER_AGENT || 'Simplex/1.0 (+https://simplex.gg)'
 
 function parseRetryAfterMs(value) {
   if (value === null || value === undefined) return null
@@ -40,6 +44,8 @@ class BuildApiClient {
     this.authApiBaseUrl = config.authApiBaseUrl || resolveAuthApiBaseUrl()
     this.authService = config.authService || null
     this.cachedNetworthCurrencyExchange = null
+    this.cachedPoeAccessToken = null
+    this.cachedPoeAccessTokenExpiresAt = 0
   }
 
   /**
@@ -404,12 +410,16 @@ class BuildApiClient {
    * @param {string} [options.realm]
    */
   async getPoeCharacters(options = {}) {
-    const params = new URLSearchParams()
-    if (typeof options.realm === 'string' && options.realm.trim()) {
-      params.set('realm', options.realm.trim())
+    const realm = typeof options.realm === 'string' && options.realm.trim()
+      ? options.realm.trim().toLowerCase()
+      : 'pc'
+    const realmPrefix = realm && realm !== 'pc' ? `/${encodeURIComponent(realm)}` : ''
+    const characters = await this.callDirectPoeApi(`/character${realmPrefix}`, { method: 'GET' })
+    return {
+      characters: Array.isArray(characters)
+        ? characters
+        : (Array.isArray(characters?.characters) ? characters.characters : []),
     }
-    const query = params.toString()
-    return this.request(`/poe/characters${query ? `?${query}` : ''}`, {}, this.getOAuthApiBaseUrl())
   }
 
   /**
@@ -427,6 +437,51 @@ class BuildApiClient {
    * @param {string|Object|null} [options.body]
    */
   async callPoeApi(endpoint, options = {}) {
+    const method = typeof options.method === 'string' ? options.method.toUpperCase() : 'GET'
+    logger.info('poe:api:dispatch', {
+      mode: 'direct',
+      method,
+      endpoint,
+    })
+    return this.callDirectPoeApi(endpoint, options)
+  }
+
+  clearCachedPoeAccessToken() {
+    this.cachedPoeAccessToken = null
+    this.cachedPoeAccessTokenExpiresAt = 0
+  }
+
+  async getPoeAccessToken({ forceRefresh = false } = {}) {
+    if (!forceRefresh && this.cachedPoeAccessToken) {
+      const expiresAt = Number(this.cachedPoeAccessTokenExpiresAt || 0)
+      if (!Number.isFinite(expiresAt) || expiresAt > Date.now() + POE_TOKEN_REFRESH_GRACE_MS) {
+        logger.info('poe:access-token:cache-hit', {
+          expiresAt,
+        })
+        return this.cachedPoeAccessToken
+      }
+    }
+
+    logger.info('poe:access-token:request', {
+      mode: 'bridge',
+      forceRefresh,
+    })
+    const payload = await this.request('/poe/access-token', {}, this.getOAuthApiBaseUrl())
+    const accessToken = typeof payload?.accessToken === 'string' ? payload.accessToken : null
+    if (!accessToken) {
+      throw new Error('Failed to obtain PoE access token')
+    }
+    this.cachedPoeAccessToken = accessToken
+    this.cachedPoeAccessTokenExpiresAt = Number(payload?.expiresAt || 0)
+    logger.info('poe:access-token:resolved', {
+      mode: 'bridge',
+      forceRefresh,
+      expiresAt: this.cachedPoeAccessTokenExpiresAt,
+    })
+    return accessToken
+  }
+
+  async callDirectPoeApi(endpoint, options = {}) {
     if (!endpoint || typeof endpoint !== 'string') {
       throw new Error('endpoint is required')
     }
@@ -436,15 +491,64 @@ class BuildApiClient {
     if (body && typeof body !== 'string') {
       body = JSON.stringify(body)
     }
-    return this.request('/poe/proxy', {
-      method: 'POST',
-      suppressErrorLog,
-      body: JSON.stringify({
-        endpoint,
+    const doRequest = async (forceRefresh = false) => {
+      const accessToken = await this.getPoeAccessToken({ forceRefresh })
+      logger.info('poe:api:request', {
+        mode: 'direct',
         method,
-        body: body || null,
-      }),
-    }, this.getOAuthApiBaseUrl())
+        endpoint,
+        forceRefresh,
+      })
+      const response = await fetch(`${POE_API_BASE_URL}${endpoint}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': POE_USER_AGENT,
+        },
+        body: method === 'GET' || method === 'HEAD' ? undefined : body || undefined,
+        timeout: typeof options.timeout === 'number' ? options.timeout : REQUEST_TIMEOUT_MS,
+      })
+
+      if (response.status === 401 && !forceRefresh) {
+        logger.warn('poe:api:unauthorized', {
+          mode: 'direct',
+          method,
+          endpoint,
+          action: 'refresh-token-and-retry',
+        })
+        this.clearCachedPoeAccessToken()
+        return doRequest(true)
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        const requestError = new Error(`PoE API request failed: ${response.status} ${errorText}`)
+        requestError.status = response.status
+        requestError.url = `${POE_API_BASE_URL}${endpoint}`
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After'))
+        if (retryAfterMs !== null) {
+          requestError.retryAfterMs = retryAfterMs
+          requestError.retryAfterAt = Date.now() + retryAfterMs
+        }
+        if (!suppressErrorLog) {
+          console.error('PoE API request failed:', requestError)
+        }
+        throw requestError
+      }
+
+      logger.info('poe:api:response', {
+        mode: 'direct',
+        method,
+        endpoint,
+        status: response.status,
+      })
+
+      return response.json()
+    }
+
+    return doRequest(false)
   }
 
   /**

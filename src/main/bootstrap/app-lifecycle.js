@@ -5,6 +5,7 @@ function registerAppLifecycleHandlers({
   globalShortcut,
   getSettings,
   saveSettings,
+  flushDeferredState,
   setIsQuitting,
   getIsQuitting,
   createOverlayWindow,
@@ -20,6 +21,13 @@ function registerAppLifecycleHandlers({
   app.on('before-quit', () => {
     setIsQuitting(true);
     try { globalShortcut.unregisterAll(); } catch {}
+    try {
+      if (typeof flushDeferredState === 'function') {
+        flushDeferredState();
+      }
+    } catch (error) {
+      logger.warn('app:before-quit:flush-deferred-state-failed', { error: String(error) });
+    }
     const settings = getSettings();
     if (settings) {
       saveSettings(settings);

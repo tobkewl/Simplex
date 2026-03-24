@@ -1999,7 +1999,12 @@ async function deleteFeed(feedId) {
 }
 
 // Add new feed: create a new block and open inline dropdown for editing
-async function addNewFeed() {
+async function addNewFeed(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   const newFeed = {
     id: `feed-${Date.now()}`,
     name: 'New Feed',
@@ -2273,6 +2278,7 @@ document.addEventListener('click', (e) => {
 
   if (!feedDropdown.classList.contains('hidden') &&
       !feedDropdown.contains(e.target) &&
+      !addFeedIcon.contains(e.target) &&
       !e.target.closest('.feed-icon')) {
     closeDropdown();
   }

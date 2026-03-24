@@ -3,6 +3,72 @@ const { setupAccentTheme } = require('./theme');
 
 setupAccentTheme();
 
+const allowedInvokeChannels = new Set([
+  'settings:get',
+  'settings:set',
+  'management:updateFeed',
+  'management:addFeed',
+  'management:toggleAllFeedsMute',
+  'management:deleteFeed',
+  'networth:getLastScan',
+  'networth-overlay:isVisible',
+  'build-overlay:isVisible',
+  'build:getActiveGuideState',
+  'live-tracking:toggle-active-character',
+]);
+
+const allowedSendChannels = new Set([
+  'settings:show',
+  'settings:toggle',
+  'management:setClickThrough',
+  'management:setFocusMode',
+  'networth:showOverlay',
+  'networth:toggleOverlay',
+  'build:showOverlay',
+  'build:toggleOverlay',
+  'run:togglePause',
+  'run:requestEnd',
+]);
+
+const allowedOnChannels = new Set([
+  'management:feedIconUpdate',
+  'settings:updated',
+  'management:forceOpen',
+  'build:positionLevelPopup',
+  'build:levelUp',
+  'settings:windowOpened',
+  'settings:windowClosed',
+  'shortcut:buildQuickPreview',
+  'shortcut:openSettings',
+  'run:timerUpdate',
+  'run:started',
+  'run:ended',
+]);
+
+function safeInvoke(channel, ...args) {
+  if (!allowedInvokeChannels.has(channel)) {
+    throw new Error(`IPC invoke not allowed: ${channel}`);
+  }
+  return ipcRenderer.invoke(channel, ...args);
+}
+
+function safeSend(channel, ...args) {
+  if (!allowedSendChannels.has(channel)) {
+    throw new Error(`IPC send not allowed: ${channel}`);
+  }
+  ipcRenderer.send(channel, ...args);
+}
+
+function safeOn(channel, callback) {
+  if (!allowedOnChannels.has(channel)) {
+    throw new Error(`IPC on not allowed: ${channel}`);
+  }
+  if (typeof callback !== 'function') {
+    throw new Error('IPC on callback must be a function');
+  }
+  ipcRenderer.on(channel, (_e, ...args) => callback(...args));
+}
+
 contextBridge.exposeInMainWorld('managementAPI', {
   getPublicConfig: () => ({
     gearImagesBaseUrl:
@@ -11,110 +77,86 @@ contextBridge.exposeInMainWorld('managementAPI', {
       '',
     gearImagesBucket: process.env.NEXT_PUBLIC_GEAR_IMAGES_BUCKET || 'gear-images',
   }),
-  getSettings: () => ipcRenderer.invoke('settings:get'),
+  getSettings: () => safeInvoke('settings:get'),
 
-  updateSettings: (partial) => ipcRenderer.invoke('settings:set', partial),
+  updateSettings: (partial) => safeInvoke('settings:set', partial),
 
-  saveSettings: (partial) => ipcRenderer.invoke('settings:set', partial),
+  saveSettings: (partial) => safeInvoke('settings:set', partial),
 
-  updateFeed: (feedId, updates) => ipcRenderer.invoke('management:updateFeed', feedId, updates),
+  updateFeed: (feedId, updates) => safeInvoke('management:updateFeed', feedId, updates),
 
-  addFeed: (feed) => ipcRenderer.invoke('management:addFeed', feed),
+  addFeed: (feed) => safeInvoke('management:addFeed', feed),
 
-  deleteFeed: (feedId) => ipcRenderer.invoke('management:deleteFeed', feedId),
+  deleteFeed: (feedId) => safeInvoke('management:deleteFeed', feedId),
 
-  toggleAllFeedsMute: () => ipcRenderer.invoke('management:toggleAllFeedsMute'),
+  toggleAllFeedsMute: () => safeInvoke('management:toggleAllFeedsMute'),
 
   // Open the focusable Settings window (Feeds tab) for adding feeds
-  openSettings: (tab) => ipcRenderer.send('settings:show', tab),
-  toggleSettings: (tab) => ipcRenderer.send('settings:toggle', tab),
+  openSettings: (tab) => safeSend('settings:show', tab),
+  toggleSettings: (tab) => safeSend('settings:toggle', tab),
 
   onFeedIconUpdate: (cb) => {
-    ipcRenderer.on('management:feedIconUpdate', (_e, data) => {
-      cb(data);
-    });
+    safeOn('management:feedIconUpdate', cb);
   },
 
   onSettingsUpdated: (cb) => {
-    ipcRenderer.on('settings:updated', (_e, settings) => {
-      cb(settings);
-    });
+    safeOn('settings:updated', cb);
   },
 
   onForceOpen: (cb) => {
-    ipcRenderer.on('management:forceOpen', () => {
-      cb();
-    });
+    safeOn('management:forceOpen', cb);
   },
   onPositionLevelPopup: (cb) => {
-    ipcRenderer.on('build:positionLevelPopup', () => {
-      cb();
-    });
+    safeOn('build:positionLevelPopup', cb);
   },
 
   setClickThrough: (enabled) => {
-    ipcRenderer.send('management:setClickThrough', enabled);
+    safeSend('management:setClickThrough', enabled);
   },
   setFocusMode: (enabled) => {
-    ipcRenderer.send('management:setFocusMode', enabled);
+    safeSend('management:setFocusMode', enabled);
   },
 
   // Net Worth API
-  getLastScan: () => ipcRenderer.invoke('networth:getLastScan'),
-  openNetworthOverlay: () => ipcRenderer.send('networth:showOverlay'),
-  toggleNetworthOverlay: () => ipcRenderer.send('networth:toggleOverlay'),
-  isNetworthOverlayVisible: () => ipcRenderer.invoke('networth-overlay:isVisible'),
+  getLastScan: () => safeInvoke('networth:getLastScan'),
+  openNetworthOverlay: () => safeSend('networth:showOverlay'),
+  toggleNetworthOverlay: () => safeSend('networth:toggleOverlay'),
+  isNetworthOverlayVisible: () => safeInvoke('networth-overlay:isVisible'),
 
   // Build Guide API
-  openBuildOverlay: () => ipcRenderer.send('build:showOverlay'),
-  toggleBuildOverlay: () => ipcRenderer.send('build:toggleOverlay'),
-  isBuildOverlayVisible: () => ipcRenderer.invoke('build-overlay:isVisible'),
-  getActiveGuideState: () => ipcRenderer.invoke('build:getActiveGuideState'),
-  toggleLiveTrackingForActiveCharacter: (options) => ipcRenderer.invoke('live-tracking:toggle-active-character', options || {}),
+  openBuildOverlay: () => safeSend('build:showOverlay'),
+  toggleBuildOverlay: () => safeSend('build:toggleOverlay'),
+  isBuildOverlayVisible: () => safeInvoke('build-overlay:isVisible'),
+  getActiveGuideState: () => safeInvoke('build:getActiveGuideState'),
+  toggleLiveTrackingForActiveCharacter: (options) => safeInvoke('live-tracking:toggle-active-character', options || {}),
   onBuildLevelUp: (cb) => {
-    ipcRenderer.on('build:levelUp', (_e, payload) => {
-      cb(payload);
-    });
+    safeOn('build:levelUp', cb);
   },
 
   // Settings window events
   onSettingsWindowOpened: (cb) => {
-    ipcRenderer.on('settings:windowOpened', (_e, tab) => {
-      cb(tab);
-    });
+    safeOn('settings:windowOpened', cb);
   },
   onSettingsWindowClosed: (cb) => {
-    ipcRenderer.on('settings:windowClosed', () => {
-      cb();
-    });
+    safeOn('settings:windowClosed', cb);
   },
   onShortcutBuildQuickPreview: (cb) => {
-    ipcRenderer.on('shortcut:buildQuickPreview', () => {
-      cb();
-    });
+    safeOn('shortcut:buildQuickPreview', cb);
   },
   onShortcutOpenSettings: (cb) => {
-    ipcRenderer.on('shortcut:openSettings', () => {
-      cb();
-    });
+    safeOn('shortcut:openSettings', cb);
   },
 
   // Run timer events
   onRunTimerUpdate: (cb) => {
-    ipcRenderer.on('run:timerUpdate', (_e, data) => {
-      cb(data);
-    });
+    safeOn('run:timerUpdate', cb);
   },
   onRunStarted: (cb) => {
-    ipcRenderer.on('run:started', (_e, data) => {
-      cb(data);
-    });
+    safeOn('run:started', cb);
   },
   onRunEnded: (cb) => {
-    ipcRenderer.on('run:ended', () => {
-      cb();
-    });
+    safeOn('run:ended', cb);
   },
-  toggleRunPause: () => ipcRenderer.send('run:togglePause'),
-  requestRunEnd: () => ipcRenderer.send('run:requestEnd')
+  toggleRunPause: () => safeSend('run:togglePause'),
+  requestRunEnd: () => safeSend('run:requestEnd')
 });

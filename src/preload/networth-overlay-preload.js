@@ -377,6 +377,7 @@ function toLegacyTaskQueue(data) {
   const source = asObject(data) || {};
   return {
     pricing: asArray(source.pricing),
+    pricingHistory: asArray(source.pricingHistory),
     scans: asArray(source.scans || source.scan),
     pricingPaused: source.pricingPaused === true,
     rateLimits: asObject(source.rateLimits) || null,
@@ -517,7 +518,9 @@ contextBridge.exposeInMainWorld('networthOverlayAPI', {
   pausePricingQueue: () => ipcRenderer.invoke('networth:pausePricingQueue'),
   resumePricingQueue: () => ipcRenderer.invoke('networth:resumePricingQueue'),
   removePricingQueueItem: (itemKey) => ipcRenderer.invoke('networth:removePricingQueueItem', itemKey),
+  removePricingHistoryItem: (id) => ipcRenderer.invoke('networth:removePricingHistoryItem', id),
   clearPricingQueue: () => ipcRenderer.invoke('networth:clearPricingQueue'),
+  clearPricingHistory: () => ipcRenderer.invoke('networth:clearPricingHistory'),
   enqueuePricingItems: (items, _league) => ipcRenderer.invoke('networth:enqueuePricingItems', items, NETWORTH_ACTIVE_LEAGUE),
   enqueueUnpricedItems: (payload) => ipcRenderer.invoke('networth:enqueueUnpricedItems', {
     ...(payload || {}),
